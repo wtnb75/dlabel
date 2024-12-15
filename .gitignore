@@ -1,0 +1,10 @@
+*.pyc
+*.bak
+__pycache__
+tmp/
+.envrc
+*.egg-info/
+dist/
+build/
+cover
+.coverage
