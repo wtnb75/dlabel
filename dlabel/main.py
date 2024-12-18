@@ -6,6 +6,9 @@ from logging import getLogger
 from typing import Any
 import yaml
 import re
+import sys
+import io
+import tarfile
 import fnmatch
 
 VERSION = "0.1.dev1"
@@ -115,14 +118,15 @@ def convdict(convmap: dict[str, str], fromdict: dict[str, Any], todict: dict[str
             todict[v] = fromdict.get(k)
 
 
-def convdict_differ(convmap: dict[str, str], dict_img: dict[str, Any], dict_ctn: dict[str, Any], todict: dict[str, Any]):
+def convdict_differ(
+        convmap: dict[str, str], dict_img: dict[str, Any], dict_ctn: dict[str, Any], todict: dict[str, Any]):
     for k, v in convmap.items():
         if k in dict_ctn and dict_img.get(k) != dict_ctn.get(k):
             todict[v] = dict_ctn[k]
 
 
 @cli.command()
-@click.option("--output", type=click.File("w"), default="-", show_default=True)
+@click.option("--output", type=click.Path(file_okay=False, dir_okay=True, exists=True, writable=True))
 @click.option("--all/--compose", default=False, show_default=True)
 @click.option("--project", default="*", show_default=True)
 @verbose_option
@@ -144,7 +148,7 @@ def compose(client: docker.DockerClient, output, all, project):
             _log.debug("skip by project (%s)", proj)
             continue
         name = labels.get("com.docker.compose.service", ctn.name)
-        img = client.images.get(name=ctn.attrs.get("Image"))
+        img = ctn.image
         imglabel = img.labels
         imgconfig = img.attrs.get("Config", {})
         for k, v in imglabel.items():
@@ -163,12 +167,42 @@ def compose(client: docker.DockerClient, output, all, project):
             if imgvol and v[1] in imgvol:
                 continue
             src = Path(v[0])
+            dest = v[1]
             if src.is_relative_to(wdir):
                 src = "./" + str(src.relative_to(wdir))
             if len(v) == 2:
-                cvols.append(f"{src}:{v[1]}")
+                cvols.append(f"{src}:{dest}")
             elif len(v) == 3:
-                cvols.append(f"{src}:{v[1]}:{v[2]}")
+                cvols.append(f"{src}:{dest}:{v[2]}")
+            if output and isinstance(src, str) and src.startswith("./"):
+                def tfilter(member, path):
+                    res = tarfile.data_filter(member, path)
+                    if res:
+                        if '/' in res.name:
+                            _, res.name = res.name.split('/', 1)
+                            return res
+                    return None
+                _log.info("copy %s:%s -> %s", name, dest, src)
+                odir: Path = Path(output) / src
+                assert odir.is_relative_to(output)
+                bin, arc = ctn.get_archive(dest)
+                _log.debug("arc=%s", arc)
+                bio = io.BytesIO()
+                for x in bin:
+                    bio.write(x)
+                bio.seek(0)
+                tf = tarfile.TarFile(fileobj=bio)
+                members = tf.getmembers()
+                if len(members) == 1 and members[0].isreg():
+                    _log.info("single file: %s", members[0])
+                    tf.extractall(odir.parent, filter='data')
+                else:
+                    odir.mkdir(exist_ok=True, parents=True)
+                    tf.extractall(odir, filter=tfilter)
+                tf.close()
+                bio.close()
+            elif output:
+                _log.info("skip copy: %s:%s -> %s", name, dest, src)
         for m in hostconfig.get("Mounts", []):
             if imgvol and m.get("Target") in imgvol:
                 continue
@@ -240,7 +274,11 @@ def compose(client: docker.DockerClient, output, all, project):
         res["volumes"] = vols
     if nets:
         res["networks"] = nets
-    yaml.dump(res, stream=output, allow_unicode=True, encoding="utf-8", sort_keys=False)
+    if output:
+        with (Path(output) / "compose.yml").open("w") as ofp:
+            yaml.dump(res, stream=ofp, allow_unicode=True, encoding="utf-8", sort_keys=False)
+    else:
+        yaml.dump(res, stream=sys.stdout, allow_unicode=True, encoding='utf-8', sort_keys=False)
 
 
 def tflabel2dict(labels: dict[str, str], prefix: str) -> dict[str, dict[str, str]]:
@@ -324,6 +362,7 @@ def traefik2nginx(client: docker.DockerClient, output, ipaddr):
                     confs.append(f"add_header {hdr} {v}")
                 elif k.split(".", 1)[0] not in ("stripprefix", "addprefix", "headers"):
                     _log.info("not supported middleware: %s", k)
+            print(f"# {name} {location_key} -> {addresses[0]}:{dest}")
             print("location %s {" % (location_key))
             for i in confs:
                 print("  "+i+";")
