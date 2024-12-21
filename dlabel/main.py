@@ -4,14 +4,13 @@ import click
 from pathlib import Path
 from logging import getLogger
 from typing import Any
-import yaml
 import re
 import sys
 import io
 import tarfile
 import fnmatch
+from .version import VERSION
 
-VERSION = "0.1.dev1"
 _log = getLogger(__name__)
 
 
@@ -39,6 +38,21 @@ def verbose_option(func):
     return _
 
 
+def format_option(func):
+    @click.option("--format", default="yaml", type=click.Choice(["yaml", "json"]), show_default=True)
+    @functools.wraps(func)
+    def _(format, **kwargs):
+        res = func(**kwargs)
+        if format == "json":
+            import json
+            json.dump(res, indent=2, fp=sys.stdout, ensure_ascii=False)
+        elif format == "yaml":
+            import yaml
+            yaml.dump(res, stream=sys.stdout, allow_unicode=True, encoding="utf-8", sort_keys=False)
+        return res
+    return _
+
+
 def docker_option(func):
     @click.option("-H", "--host", envvar="DOCKER_HOST", help="Daemon socket(s) to connect to", show_envvar=True)
     @functools.wraps(func)
@@ -56,6 +70,7 @@ def docker_option(func):
 @click.option("--output", type=click.File("w"), default="-", show_default=True)
 @verbose_option
 @docker_option
+@format_option
 def summary(client: docker.DockerClient, output):
     """show name and labels of containers"""
     res: list[dict] = []
@@ -64,13 +79,14 @@ def summary(client: docker.DockerClient, output):
             "name": ctn.name,
             "labels": ctn.attrs["Config"]["Labels"]
         })
-    yaml.dump(res, stream=output, allow_unicode=True, encoding="utf-8", sort_keys=False)
+    return res
 
 
 @cli.command()
 @click.option("--output", type=click.File("w"), default="-", show_default=True)
 @verbose_option
 @docker_option
+@format_option
 def attrs(client: docker.DockerClient, output):
     """show name and attributes of containers"""
     res: list[dict] = []
@@ -79,7 +95,7 @@ def attrs(client: docker.DockerClient, output):
             "name": ctn.name,
             "attrs": ctn.attrs
         })
-    yaml.dump(res, stream=output, allow_unicode=True, encoding="utf-8", sort_keys=False)
+    return res
 
 
 def envlist2map(env: list[str], sep: str = "=") -> dict[str, str]:
@@ -163,6 +179,7 @@ def copy_files(ctn: docker.models.containers.Container, src: str, dst: str):
 @click.option("--project", default="*", show_default=True)
 @verbose_option
 @docker_option
+@format_option
 def compose(client: docker.DockerClient, output, all, project, volume):
     """generate docker-compose.yml from running containers"""
     svcs = {}
@@ -204,7 +221,7 @@ def compose(client: docker.DockerClient, output, all, project, volume):
             dest = v[1]
             if src.is_relative_to(wdir):
                 src = "./" + str(src.relative_to(wdir))
-            if len(v) == 2:
+            if len(v) == 2 or v[2] == "rw":
                 cvols.append(f"{src}:{dest}")
             elif len(v) == 3:
                 cvols.append(f"{src}:{dest}:{v[2]}")
@@ -285,9 +302,9 @@ def compose(client: docker.DockerClient, output, all, project, volume):
         res["networks"] = nets
     if output:
         with (Path(output) / "compose.yml").open("w") as ofp:
+            import yaml
             yaml.dump(res, stream=ofp, allow_unicode=True, encoding="utf-8", sort_keys=False)
-    else:
-        yaml.dump(res, stream=sys.stdout, allow_unicode=True, encoding='utf-8', sort_keys=False)
+    return res
 
 
 def tflabel2dict(labels: dict[str, str], prefix: str) -> dict[str, dict[str, str]]:
@@ -302,13 +319,50 @@ def tflabel2dict(labels: dict[str, str], prefix: str) -> dict[str, dict[str, str
     return res
 
 
+def find_block(conf: list[dict], directive: str):
+    for c in conf:
+        if c.get("directive") == directive:
+            _log.debug("found directive %s: %s", directive, c)
+            yield c
+
+
+def find_server_block(conf: dict, server_name: str) -> list:
+    for conf in conf.get("config", []):
+        for http in find_block(conf.get("parsed", []), "http"):
+            for srv in find_block(http.get("block", []), "server"):
+                for name in find_block(srv.get("block", []), "server_name"):
+                    if server_name in name.get("args", []):
+                        return srv.get("block", [])
+
+
 @cli.command()
 @click.option("--output", type=click.File("w"), default="-", show_default=True)
+@click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True), default=None, show_default=True)
+@click.option("--server-name", default="localhost", show_default=True)
 @click.option("--ipaddr/--hostname", default=False, show_default=True)
 @verbose_option
 @docker_option
-def traefik2nginx(client: docker.DockerClient, output, ipaddr):
+def traefik2nginx(client: docker.DockerClient, output, ipaddr, baseconf, server_name):
     """generate nginx configuration from traefik labels"""
+    import crossplane
+    if baseconf:
+        nginx_confs = crossplane.parse(baseconf)
+    else:
+        import tempfile
+        minconf = """
+user nginx;
+worker_processes auto;
+error_log /dev/stderr notice;
+events {worker_connections 512;}
+http {server {server_name %s;}}
+""" % (server_name)
+        with tempfile.NamedTemporaryFile("r+") as tf:
+            tf.write(minconf)
+            tf.seek(0)
+            nginx_confs = crossplane.parse(tf.name, combine=True)
+    target = find_server_block(nginx_confs, server_name)
+    _log.debug("target: %s", target)
+    assert target is not None
     for ctn in client.containers.list():
         name = ctn.name
         labels = ctn.attrs["Config"]["Labels"]
@@ -332,25 +386,34 @@ def traefik2nginx(client: docker.DockerClient, output, ipaddr):
                 _log.debug("not match lbport: %s", router_config)
                 continue
             m = re.match(r"^PathPrefix\(`(?P<prefix>[^`]+)`\)$", rule)
-            location_key = None
+            location_key = []
             if m:
-                location_key = m.group("prefix")
+                location_key = [m.group("prefix")]
             else:
                 m = re.match(r"^Path\(`(?P<path>[^`]+)`\)$", rule)
                 if m:
-                    location_key = f"= {m.group('path')}"
+                    location_key = ["=", m.group('path')]
             if not location_key:
                 _log.info("not supported rule: %s", rule)
                 continue
-            confs = [f"proxy_pass http://{pass_to}:{dest}"]
+            blk = []
+            blk.append({
+                "directive": "proxy_pass",
+                "args": [f"http://{pass_to}:{dest}"],
+            })
             mdls = router_config.get("middlewares", "").split(",")
             mdlconf = {}
-            for mname in mdls:
+            for idx, mname in enumerate(mdls, start=1):
                 if not mname:
                     continue
                 _log.debug("middleware[%s]: %s", location_key, mname)
                 if mname not in middlewares:
                     _log.info("middleware not found: %s", mname)
+                    blk.append({
+                        "directive": "#",
+                        "comment": f" middleware {mname} not found",
+                        "line": idx,
+                    })
                 mdlconf.update(middlewares.get(mname, {}))
             _log.debug("middleware configurations: %s", mdlconf)
             del_prefix = ""
@@ -362,30 +425,53 @@ def traefik2nginx(client: docker.DockerClient, output, ipaddr):
             if mdlconf.get("addprefix.prefix"):
                 add_prefix = mdlconf["addprefix.prefix"]
             if del_prefix or add_prefix != "/":
-                confs.append(f"rewrite {del_prefix}(.*) {add_prefix}$1 break")
+                blk.append({
+                    "directive": "rewrite",
+                    "args": [f"{del_prefix}(.*)", f"{add_prefix}$1", "break"],
+                })
             for k, v in mdlconf.items():
                 if k.startswith("headers.customrequestheaders."):
                     hdr = k[len("headers.customrequestheaders."):]
-                    confs.append(f"proxy_set_header {hdr} {v}")
+                    blk.append({
+                        "directive": "proxy_set_header",
+                        "args": [hdr, v],
+                    })
                 elif k.startswith("headers.customresponseheaders."):
                     hdr = k[len("headers.customresponseheaders."):]
-                    confs.append(f"add_header {hdr} {v}")
+                    blk.append({
+                        "directive": "add_header",
+                        "args": [hdr, v],
+                    })
                 elif k.split(".", 1)[0] not in ("stripprefix", "addprefix", "headers"):
                     _log.info("not supported middleware: %s", k)
-            print(f"# {name} {location_key} -> {addresses[0]}:{dest}")
-            print("location %s {" % (location_key))
-            for i in confs:
-                print("  "+i+";")
-            print("}")
+                    blk.append({
+                        "directive": "#",
+                        "comment": f" not supported middleware: {k}",
+                        "line": 1,
+                    })
+            target.append({
+                "directive": "#",
+                "comment": f" {name}: {' '.join(location_key)} -> {addresses[0]}:{dest}",
+                "line": 1
+            })
+            location = {
+                "directive": "location",
+                "args": location_key,
+                "block": blk,
+            }
+            target.append(location)
+    for conf in nginx_confs.get("config", []):
+        output.write(crossplane.build(conf.get("parsed", [])))
+        output.write("\n")
 
 
 @cli.command()
 @docker_option
 @verbose_option
+@format_option
 def list_volume(client: docker.DockerClient):
     """list volumes"""
-    yaml.dump([x.attrs for x in client.volumes.list()], stream=sys.stdout,
-              allow_unicode=True, encoding="utf-8", sort_keys=False)
+    return [x.attrs for x in client.volumes.list()]
 
 
 @cli.command()
