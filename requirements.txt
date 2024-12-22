@@ -2,3 +2,5 @@ docker
 click
 pyyaml
 crossplane
+dictknife
+toml

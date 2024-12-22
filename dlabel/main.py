@@ -3,7 +3,7 @@ import docker
 import click
 from logging import getLogger
 import sys
-from .traefik import traefik2nginx
+from .traefik import traefik2nginx, traefik_dump
 from .compose import compose
 from .version import VERSION
 
@@ -35,7 +35,7 @@ def verbose_option(func):
 
 
 def format_option(func):
-    @click.option("--format", default="yaml", type=click.Choice(["yaml", "json"]), show_default=True)
+    @click.option("--format", default="yaml", type=click.Choice(["yaml", "json", "toml"]), show_default=True)
     @functools.wraps(func)
     def _(format, **kwargs):
         res = func(**kwargs)
@@ -45,6 +45,9 @@ def format_option(func):
         elif format == "yaml":
             import yaml
             yaml.dump(res, stream=sys.stdout, allow_unicode=True, encoding="utf-8", sort_keys=False)
+        elif format == "toml":
+            import toml
+            toml.dump(res, sys.stdout)
         return res
     return _
 
@@ -116,6 +119,15 @@ def _compose(*args, **kwargs):
 @docker_option
 def _traefik2nginx(*args, **kwargs):
     return traefik2nginx(*args, **kwargs)
+
+
+@cli.command(traefik_dump.__name__.replace("_", "-"), help=traefik_dump.__doc__)
+@click.option("--ipaddr/--hostname", default=False, show_default=True)
+@verbose_option
+@docker_option
+@format_option
+def _traefik_dump(*args, **kwargs):
+    return traefik_dump(*args, **kwargs)
 
 
 @cli.command()
