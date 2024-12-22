@@ -3,7 +3,7 @@ from unittest.mock import patch, MagicMock
 from click.testing import CliRunner
 import yaml
 
-from dlabel.main import compose
+from dlabel.main import _compose as compose
 
 
 class TestCompose(unittest.TestCase):
