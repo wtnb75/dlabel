@@ -1,5 +1,11 @@
 import docker
 import re
+import io
+import tarfile
+import yaml
+import toml
+from dictknife import deepmerge
+from typing import Any
 from logging import getLogger
 _log = getLogger(__name__)
 
@@ -130,6 +136,93 @@ def rule2locationkey(rule: str) -> list[str]:
         if m:
             location_key = ["=", m.group('path')]
     return location_key
+
+
+def traefik_config_update(name: str, val: Any, res: dict):
+    tgt = res
+    if val == "true":
+        val = {}
+    elif val == "false":
+        val = False
+    for k in name.split(".")[:-1]:
+        if k not in tgt:
+            tgt[k] = {}
+        if isinstance(tgt[k], (str, bool)):
+            _log.debug("overwriting %s(%s) -> %s", name, tgt[k], val)
+            tgt[k] = {}
+        tgt = tgt[k]
+    _log.debug("setting %s(%s) -> %s", name, tgt, val)
+    tgt[name.split(".")[-1]] = val
+
+
+def traefik_label_config(labels: dict[str, str], host: str | None):
+    res: list[tuple[str, Any]] = []
+    for k, v in labels.items():
+        if k == "traefik.enable":
+            continue
+        if k.startswith("traefik."):
+            _, k1 = k.split(".", 1)
+            res.append((k1, v))
+            m = re.match(r"http\.services\.([^\.]+)\.loadbalancer\.server\.port", k1)
+            if m:
+                res.append((f"http.services.{m.group(1)}.loadbalancer.server.host", host))
+    return res
+
+
+def download_files(ctn: docker.models.containers.Container, filename: str):
+    bins, stat = ctn.get_archive(filename)
+    _log.debug("download %s: %s", filename, stat)
+    fp = io.BytesIO()
+    for chunk in bins:
+        fp.write(chunk)
+    fp.seek(0)
+    with tarfile.open(fileobj=fp) as tar:
+        for member in tar.getmembers():
+            if member.isfile():
+                _log.debug("extract %s", member.name)
+                yield member.name, tar.extractfile(member).read()
+
+
+def traefik_container_config(ctn: docker.models.containers.Container):
+    from_args = []
+    from_conf = {}
+    for arg in ctn.attrs.get("Args", []):
+        if arg.startswith("--") and "=" in arg:
+            k, v = arg.split("=", 1)
+            from_args.append((k[2:], v))
+            if k[2:] in ("providers.file.filename", "providers.file.directory"):
+                for fn, bin in download_files(ctn, v):
+                    if fn.endswith(".yml") or fn.endswith(".yaml"):
+                        from_conf = deepmerge(from_conf, yaml.safe_load(bin))
+                    elif fn.endswith(".toml"):
+                        from_conf = deepmerge(from_conf, toml.loads(bin))
+    return from_args, from_conf
+
+
+def traefik_dump(client: docker.DockerClient, ipaddr: bool):
+    """extract traefik configuration"""
+    from_conf = {}
+    from_args: list[tuple[str, Any]] = []
+    from_label: list[tuple[str, Any]] = []
+    for ctn in client.containers.list():
+        if "traefik" in ctn.image.tags[0]:
+            _log.debug("traefik container: %s", ctn.name)
+            from_args, from_conf = traefik_container_config(ctn)
+        if ctn.labels.get("traefik.enable") in ("true",):
+            _log.debug("traefik enabled container: %s", ctn.name)
+            host = ctn.name
+            if ipaddr:
+                addrs = [x["IPAddress"] for x in ctn.attrs["NetworkSettings"]["Networks"].values()]
+                if len(addrs) != 0:
+                    host = addrs[0]
+            ctn_label = traefik_label_config(ctn.labels, host)
+            from_label.extend(ctn_label)
+    res = from_conf.copy()
+    for arg, val in from_label:
+        traefik_config_update(arg, val, res)
+    for arg, val in from_args:
+        traefik_config_update(arg, val, res)
+    return res
 
 
 def traefik2nginx(client: docker.DockerClient, output, ipaddr, baseconf, server_name):

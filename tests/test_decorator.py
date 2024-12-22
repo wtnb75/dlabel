@@ -4,6 +4,7 @@ import click
 from click.testing import CliRunner
 import json
 import yaml
+import tomllib
 
 from dlabel.main import verbose_option, format_option, docker_option
 
@@ -70,6 +71,11 @@ class TestFormatOption(unittest.TestCase):
         result = self.runner.invoke(self.dummy_command, ['--format', 'json'])
         self.assertEqual(result.exit_code, 0)
         self.assertEqual({"key": "value"}, json.loads(result.output))
+
+    def test_format_option_toml(self):
+        result = self.runner.invoke(self.dummy_command, ['--format', 'toml'])
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual({"key": "value"}, tomllib.loads(result.output))
 
     def test_format_option_error(self):
         result = self.runner.invoke(self.dummy_command, ['--format', 'another'])
