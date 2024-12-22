@@ -1,0 +1,40 @@
+name: branch
+
+on:
+  push:
+    branches-ignore: [main, gh-pages]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - uses: actions/cache@v4
+      with:
+        path: _cache
+        key: ${{ runner.os }}-pip-${{ github.sha }}
+        restore-keys: ${{ runner.os }}-pip-
+    - uses: wtnb75/actions/python@main
+      with:
+        pipinstall: ".[ssh] --cache-dir _cache"
+    - uses: wtnb75/actions/flake8@main
+    - uses: wtnb75/actions/pytest@main
+    - uses: wtnb75/actions/wheel@main
+    - id: pdoc
+      uses: wtnb75/actions/pdoc@main
+      with:
+        output-dir: docs
+        module: dlabel
+    - uses: docker/setup-qemu-action@v3
+    - uses: ./.github/actions/pipcache
+    - uses: wtnb75/actions/merge-pages@main
+      with:
+        dirs: "cover docs"
+        #pydist: dist
+    - uses: wtnb75/actions/docker@main
+      with:
+        push: 'true'
+        context: .
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+        image-version: ${{ github.ref_name }}

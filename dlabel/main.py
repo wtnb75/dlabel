@@ -260,7 +260,7 @@ def compose(client: docker.DockerClient, output, all, project, volume):
             svc["networks"] = cnws
         if hostconfig.get("PortBindings"):
             svc["ports"] = portmap2compose(hostconfig.get("PortBindings", {}))
-        if hostconfig.get("RestartPolicy", {}).get("Name") != "no":
+        if hostconfig.get("RestartPolicy", {}).get("Name") not in ("no", None):
             svc["restart"] = hostconfig.get("RestartPolicy", {}).get("Name")
         if labels:
             svc["labels"] = labels
