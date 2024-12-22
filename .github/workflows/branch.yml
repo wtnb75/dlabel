@@ -25,16 +25,7 @@ jobs:
       with:
         output-dir: docs
         module: dlabel
-    - uses: docker/setup-qemu-action@v3
-    - uses: ./.github/actions/pipcache
     - uses: wtnb75/actions/merge-pages@main
       with:
         dirs: "cover docs"
         #pydist: dist
-    - uses: wtnb75/actions/docker@main
-      with:
-        push: 'true'
-        context: .
-        username: ${{ github.actor }}
-        password: ${{ github.token }}
-        image-version: ${{ github.ref_name }}

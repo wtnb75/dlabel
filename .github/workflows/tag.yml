@@ -29,15 +29,6 @@ jobs:
       with:
         output-dir: docs
         module: dlabel
-    - uses: docker/setup-qemu-action@v3
-    - uses: ./.github/actions/pipcache
-    - uses: wtnb75/actions/docker@main
-      with:
-        push: 'true'
-        context: .
-        username: ${{ github.actor }}
-        password: ${{ github.token }}
-        image-version: ${{ github.ref_name }}
     - uses: wtnb75/actions/pypi-upload@main
       with:
         username: ${{ secrets.TWINE_USERNAME }}
