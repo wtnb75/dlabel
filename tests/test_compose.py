@@ -1,8 +1,6 @@
 import unittest
-from unittest.mock import patch, MagicMock, ANY
-import click
+from unittest.mock import patch, MagicMock
 from click.testing import CliRunner
-import json
 import yaml
 
 from dlabel.main import compose

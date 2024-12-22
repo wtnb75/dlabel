@@ -407,7 +407,8 @@ def get_middlewares(middlewares: dict[str, dict[str, str]], names: list[str], bl
 
 @cli.command()
 @click.option("--output", type=click.File("w"), default="-", show_default=True)
-@click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True), default=None, show_default=True)
+@click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
+              default=None, show_default=True)
 @click.option("--server-name", default="localhost", show_default=True)
 @click.option("--ipaddr/--hostname", default=False, show_default=True)
 @verbose_option
