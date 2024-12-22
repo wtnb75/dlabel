@@ -180,7 +180,7 @@ def copy_files(ctn: docker.models.containers.Container, src: str, dst: str):
 @verbose_option
 @docker_option
 @format_option
-def compose(client: docker.DockerClient, output, all, project, volume):
+def compose(client: docker.DockerClient, output, all, project, volume):   # noqa: C901
     """generate docker-compose.yml from running containers"""
     svcs = {}
     vols = {}
@@ -260,7 +260,7 @@ def compose(client: docker.DockerClient, output, all, project, volume):
             svc["networks"] = cnws
         if hostconfig.get("PortBindings"):
             svc["ports"] = portmap2compose(hostconfig.get("PortBindings", {}))
-        if hostconfig.get("RestartPolicy", {}).get("Name") != "no":
+        if hostconfig.get("RestartPolicy", {}).get("Name") not in ("no", None):
             svc["restart"] = hostconfig.get("RestartPolicy", {}).get("Name")
         if labels:
             svc["labels"] = labels
@@ -335,7 +335,7 @@ def find_server_block(conf: dict, server_name: str) -> list:
                         return srv.get("block", [])
 
 
-def middleware2nginx(mdlconf: dict[str, str]) -> list[dict]:
+def middleware2nginx(mdlconf: dict[str, str]) -> list[dict]:  # noqa: C901
     res = []
     del_prefix = ""
     add_prefix = "/"
@@ -407,12 +407,13 @@ def get_middlewares(middlewares: dict[str, dict[str, str]], names: list[str], bl
 
 @cli.command()
 @click.option("--output", type=click.File("w"), default="-", show_default=True)
-@click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True), default=None, show_default=True)
+@click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
+              default=None, show_default=True)
 @click.option("--server-name", default="localhost", show_default=True)
 @click.option("--ipaddr/--hostname", default=False, show_default=True)
 @verbose_option
 @docker_option
-def traefik2nginx(client: docker.DockerClient, output, ipaddr, baseconf, server_name):
+def traefik2nginx(client: docker.DockerClient, output, ipaddr, baseconf, server_name):  # noqa: C901
     """generate nginx configuration from traefik labels"""
     import crossplane
     if baseconf:

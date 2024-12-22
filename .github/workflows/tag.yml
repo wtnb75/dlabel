@@ -1,0 +1,36 @@
+name: tag
+
+on:
+  push:
+    tags:
+    - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - uses: actions/cache@v4
+      with:
+        path: _cache
+        key: ${{ runner.os }}-pip-${{ github.sha }}
+        restore-keys: ${{ runner.os }}-pip-
+    - name: versioning
+      run: "echo \"VERSION = '${GITHUB_REF##*/v}'\" > dlabel/version.py"
+    - uses: wtnb75/actions/python@main
+      with:
+        pipinstall: ".[ssh] --cache-dir _cache"
+    - uses: wtnb75/actions/flake8@main
+    - uses: wtnb75/actions/pytest@main
+    - id: wheel
+      uses: wtnb75/actions/wheel@main
+    - id: pdoc
+      uses: wtnb75/actions/pdoc@main
+      with:
+        output-dir: docs
+        module: dlabel
+    - uses: wtnb75/actions/pypi-upload@main
+      with:
+        username: ${{ secrets.TWINE_USERNAME }}
+        password: ${{ secrets.TWINE_PASSWORD }}
+        file: dist/${{ steps.wheel.outputs.filename }}
