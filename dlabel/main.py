@@ -3,7 +3,7 @@ import docker
 import click
 from logging import getLogger
 import sys
-from .traefik import traefik2nginx, traefik_dump
+from .traefik import traefik2nginx, traefik2apache, traefik_dump
 from .compose import compose
 from .version import VERSION
 
@@ -110,15 +110,25 @@ def _compose(*args, **kwargs):
 
 
 @cli.command(traefik2nginx.__name__, help=traefik2nginx.__doc__)
+@click.option("--traefik-file", type=click.File("r"), default="-", show_default=True)
 @click.option("--output", type=click.File("w"), default="-", show_default=True)
 @click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
               default=None, show_default=True)
 @click.option("--server-name", default="localhost", show_default=True)
-@click.option("--ipaddr/--hostname", default=False, show_default=True)
 @verbose_option
-@docker_option
 def _traefik2nginx(*args, **kwargs):
     return traefik2nginx(*args, **kwargs)
+
+
+@cli.command(traefik2apache.__name__, help=traefik2apache.__doc__)
+@click.option("--traefik-file", type=click.File("r"), default="-", show_default=True)
+@click.option("--output", type=click.File("w"), default="-", show_default=True)
+@click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
+              default=None, show_default=True)
+@click.option("--server-name", default="localhost", show_default=True)
+@verbose_option
+def _traefik2apache(*args, **kwargs):
+    return traefik2apache(*args, **kwargs)
 
 
 @cli.command(traefik_dump.__name__.replace("_", "-"), help=traefik_dump.__doc__)
@@ -172,6 +182,19 @@ def tar_volume(client: docker.DockerClient, volume, image, output, z):
     finally:
         cl.remove(force=True)
         _log.debug("Container removed")
+
+
+@cli.command()
+@verbose_option
+@format_option
+@click.argument("input", type=click.File("r"))
+@click.option("--strict/--no-strict", default=False, show_default=True)
+def traefik_load(input, strict):
+    """load traefik configuration"""
+    import yaml
+    from .traefik_conf import TraefikConfig
+    res = TraefikConfig.model_validate(yaml.safe_load(input), strict=strict)
+    return res.model_dump(exclude_none=True, exclude_defaults=True, exclude_unset=True)
 
 
 if __name__ == "__main__":
