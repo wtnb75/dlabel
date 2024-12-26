@@ -65,6 +65,7 @@ def middleware_headers(mdl: HttpMiddleware) -> list[dict]:
 
 
 def middleware2nginx(mdlconf: list[HttpMiddleware]) -> list[dict]:
+    _log.debug("apply middleware: %s", mdlconf)
     res = []
     del_prefix = []
     add_prefix = "/"
@@ -98,7 +99,7 @@ def rule2locationkey(rule: str) -> list[str]:
     return location_key
 
 
-def traefik_label_config(labels: dict[str, str], host: str | None):
+def traefik_label_config(labels: dict[str, str], host: str | None, ipaddr: str | None):
     res = TraefikConfig()
     for k, v in labels.items():
         if k == "traefik.enable":
@@ -108,6 +109,7 @@ def traefik_label_config(labels: dict[str, str], host: str | None):
             m = re.match(r"http\.services\.([^\.]+)\.loadbalancer\.server\.port", k1)
             if m:
                 res = res.setbyaddr(f"http.services.{m.group(1)}.loadbalancer.server.host", host)
+                res = res.setbyaddr(f"http.services.{m.group(1)}.loadbalancer.server.ipaddress", ipaddr)
                 res = res.setbyaddr(k1, int(v))
             else:
                 res = res.setbyaddr(k1, v)
@@ -147,7 +149,7 @@ def traefik_container_config(ctn: docker.models.containers.Container):
     return from_args, from_conf
 
 
-def traefik_dump(client: docker.DockerClient, ipaddr: bool):
+def traefik_dump(client: docker.DockerClient):
     """extract traefik configuration"""
     from_conf = TraefikConfig()
     from_args = TraefikConfig()
@@ -160,11 +162,12 @@ def traefik_dump(client: docker.DockerClient, ipaddr: bool):
         if ctn.labels.get("traefik.enable") in ("true",):
             _log.debug("traefik enabled container: %s", ctn.name)
             host = ctn.name
-            if ipaddr:
-                addrs = [x["IPAddress"] for x in ctn.attrs["NetworkSettings"]["Networks"].values()]
-                if len(addrs) != 0:
-                    host = addrs[0]
-            ctn_label = traefik_label_config(ctn.labels, host)
+            addrs = [x["IPAddress"] for x in ctn.attrs["NetworkSettings"]["Networks"].values()]
+            if len(addrs) != 0:
+                addr = addrs[0]
+            else:
+                addr = ""
+            ctn_label = traefik_label_config(ctn.labels, host, addr)
             from_label = from_label.merge(ctn_label)
     _log.debug("conf: %s", from_conf)
     _log.debug("arg: %s", from_args)
@@ -174,16 +177,19 @@ def traefik_dump(client: docker.DockerClient, ipaddr: bool):
     return res.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True)
 
 
-def get_backend(svc: HttpService) -> list[str]:
+def get_backend(svc: HttpService, ipaddr: bool = False) -> list[str]:
     backend_urls = []
     if svc.loadbalancer and svc.loadbalancer.servers:
         backend_urls.extend([x.get("url").removeprefix("http://") for x in svc.loadbalancer.servers])
     if svc.loadbalancer.server and svc.loadbalancer.server.port:
-        backend_urls.append(f"{svc.loadbalancer.server.host}:{svc.loadbalancer.server.port}")
+        if ipaddr:
+            backend_urls.append(f"{svc.loadbalancer.server.ipaddress}:{svc.loadbalancer.server.port}")
+        else:
+            backend_urls.append(f"{svc.loadbalancer.server.host}:{svc.loadbalancer.server.port}")
     return backend_urls
 
 
-def traefik2nginx(traefik_file, output, baseconf, server_name):
+def traefik2nginx(traefik_file, output, baseconf, server_name, ipaddr):
     """generate nginx configuration from traefik configuration"""
     import crossplane
     if baseconf:
@@ -212,12 +218,12 @@ http {server {server_name %s;}}
     for location in set(traefik_config.http.services.keys()) & set(traefik_config.http.routers.keys()):
         route, svc = routers[location], services[location]
         rule = route.rule
-        middleware_names = route.middlewares
+        middleware_names = route.middlewares or []
         _log.debug("middleware_names: %s", middleware_names)
         location_keys = [rule2locationkey(x) for x in rule.split("||")]
-        middles: list[HttpMiddleware] = [middlewares.get(x) for x in middleware_names]
+        middles: list[HttpMiddleware] = [middlewares.get(x.split("@", 1)[0]) for x in middleware_names]
         _log.debug("middles: %s", middles)
-        backend_urls = get_backend(svc)
+        backend_urls = get_backend(svc, ipaddr)
         target.append({
             "directive": "#",
             "comment": f" {location}: {', '.join([' '.join(x) for x in location_keys])} -> {', '.join(backend_urls)}",
@@ -246,7 +252,7 @@ http {server {server_name %s;}}
         output.write("\n")
 
 
-def traefik2apache(traefik_file, output, baseconf, server_name):
+def traefik2apache(traefik_file, output, baseconf, server_name, ipaddr):
     """generate apache configuration from traefik configuration"""
     traefik_config = TraefikConfig.model_validate(yaml.safe_load(traefik_file))
     services = traefik_config.http.services
@@ -258,10 +264,11 @@ def traefik2apache(traefik_file, output, baseconf, server_name):
         route, svc = routers[location], services[location]
         rule = route.rule
         _log.debug("rules: %s", rule)
-        middleware_names = route.middlewares
+        middleware_names = route.middlewares or []
         _log.debug("middleware_names: %s", middleware_names)
-        location_keys = [rule2locationkey(x) for x in rule[0].split("||")]
-        backend_urls = get_backend(svc)
+        location_keys = [rule2locationkey(x) for x in rule.split("||")]
+        _log.debug("location: %s", location_keys)
+        backend_urls = get_backend(svc, ipaddr)
         if len(backend_urls) == 1:
             backend_to = f"http://{backend_urls[0]}"
         else:

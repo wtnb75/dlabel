@@ -115,6 +115,7 @@ def _compose(*args, **kwargs):
 @click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
               default=None, show_default=True)
 @click.option("--server-name", default="localhost", show_default=True)
+@click.option("--ipaddr/--hostname", default=False, show_default=True)
 @verbose_option
 def _traefik2nginx(*args, **kwargs):
     return traefik2nginx(*args, **kwargs)
@@ -126,13 +127,13 @@ def _traefik2nginx(*args, **kwargs):
 @click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
               default=None, show_default=True)
 @click.option("--server-name", default="localhost", show_default=True)
+@click.option("--ipaddr/--hostname", default=False, show_default=True)
 @verbose_option
 def _traefik2apache(*args, **kwargs):
     return traefik2apache(*args, **kwargs)
 
 
 @cli.command(traefik_dump.__name__.replace("_", "-"), help=traefik_dump.__doc__)
-@click.option("--ipaddr/--hostname", default=False, show_default=True)
 @verbose_option
 @docker_option
 @format_option

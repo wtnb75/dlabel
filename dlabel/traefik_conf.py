@@ -84,7 +84,9 @@ class HttpRouter(Model):
 
 
 class HttpLoadBalancerServer(Model):
+    # incompatible with traefik configuration (used by docker label)
     host: str | None = None
+    ipaddress: str | None = None
     port: int | None = None
 
 
