@@ -4,3 +4,4 @@ pyyaml
 crossplane
 dictknife
 toml
+pydantic
