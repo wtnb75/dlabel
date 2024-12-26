@@ -18,7 +18,8 @@ class TestTraefikDump(unittest.TestCase):
         self.assertIn("-H", result.output)
         self.assertIn("DOCKER_HOST", result.output)
 
-    def _container(self, name, image_name, labels: dict[str, str], args: list[str], env: list[str], ipaddr: str | None = None):
+    def _container(self, name, image_name, labels: dict[str, str], args: list[str],
+                   env: list[str], ipaddr: str | None = None):
         container = MagicMock()
         container.name = name
         container.labels = labels
