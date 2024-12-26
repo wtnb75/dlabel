@@ -108,11 +108,11 @@ def traefik_label_config(labels: dict[str, str], host: str | None, ipaddr: str |
             _, k1 = k.split(".", 1)
             m = re.match(r"http\.services\.([^\.]+)\.loadbalancer\.server\.port", k1)
             if m:
-                res = res.setbyaddr(f"http.services.{m.group(1)}.loadbalancer.server.host", host)
-                res = res.setbyaddr(f"http.services.{m.group(1)}.loadbalancer.server.ipaddress", ipaddr)
-                res = res.setbyaddr(k1, int(v))
+                res = res.setbyaddr(["http", "services", m.group(1), "loadbalancer", "server", "host"], host)
+                res = res.setbyaddr(["http", "services", m.group(1), "loadbalancer", "server", "ipaddress"], ipaddr)
+                res = res.setbyaddr(k1.split("."), int(v))
             else:
-                res = res.setbyaddr(k1, v)
+                res = res.setbyaddr(k1.split("."), v)
     return res
 
 
@@ -137,11 +137,11 @@ def traefik_container_config(ctn: docker.models.containers.Container):
     for arg in ctn.attrs.get("Args", []):
         if arg.startswith("--") and "=" in arg:
             k, v = arg.split("=", 1)
-            from_args = from_args.setbyaddr(k[2:], v)
+            from_args = from_args.setbyaddr(k[2:].split("."), v)
     for env in ctn.attrs.get("Config", {}).get("Env", []):
         if env.startswith("TRAEFIK_") and "=" in env:
             k, v = env[8:].split("=", 1)
-            from_envs = from_envs.setbyaddr(k.replace("_", "."), v)
+            from_envs = from_envs.setbyaddr(k.split("_"), v)
     if from_args.providers and from_args.providers.file:
         to_load = from_args.providers.file.filename or from_args.providers.file.directory
         if to_load:
