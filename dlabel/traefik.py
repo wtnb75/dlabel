@@ -5,7 +5,7 @@ import tarfile
 import yaml
 import toml
 from logging import getLogger
-from .traefik_conf import TraefikConfig, HttpMiddleware, HttpService
+from .traefik_conf import TraefikConfig, HttpMiddleware, HttpService, ProviderConfig
 
 _log = getLogger(__name__)
 
@@ -108,11 +108,11 @@ def traefik_label_config(labels: dict[str, str], host: str | None, ipaddr: str |
             _, k1 = k.split(".", 1)
             m = re.match(r"http\.services\.([^\.]+)\.loadbalancer\.server\.port", k1)
             if m:
-                res = res.setbyaddr(f"http.services.{m.group(1)}.loadbalancer.server.host", host)
-                res = res.setbyaddr(f"http.services.{m.group(1)}.loadbalancer.server.ipaddress", ipaddr)
-                res = res.setbyaddr(k1, int(v))
+                res = res.setbyaddr(["http", "services", m.group(1), "loadbalancer", "server", "host"], host)
+                res = res.setbyaddr(["http", "services", m.group(1), "loadbalancer", "server", "ipaddress"], ipaddr)
+                res = res.setbyaddr(k1.split("."), int(v))
             else:
-                res = res.setbyaddr(k1, v)
+                res = res.setbyaddr(k1.split("."), v)
     return res
 
 
@@ -132,33 +132,46 @@ def download_files(ctn: docker.models.containers.Container, filename: str):
 
 def traefik_container_config(ctn: docker.models.containers.Container):
     from_args = TraefikConfig()
+    from_envs = TraefikConfig()
     from_conf = TraefikConfig()
     for arg in ctn.attrs.get("Args", []):
         if arg.startswith("--") and "=" in arg:
             k, v = arg.split("=", 1)
-            from_args = from_args.setbyaddr(k[2:], v)
-    if from_args.providers and from_args.providers.file:
-        to_load = from_args.providers.file.filename or from_args.providers.file.directory
+            from_args = from_args.setbyaddr(k[2:].split("."), v)
+    for env in ctn.attrs.get("Config", {}).get("Env", []):
+        if env.startswith("TRAEFIK_") and "=" in env:
+            k, v = env[8:].split("=", 1)
+            from_envs = from_envs.setbyaddr(k.split("_"), v)
+    provider = ProviderConfig()
+    provider = provider.merge(from_args.providers)
+    provider = provider.merge(from_envs.providers)
+    _log.debug("provider config: %s (arg=%s, env=%s)", provider, from_args, from_envs)
+    if provider.file:
+        _log.debug("loading file: %s", provider.file)
+        to_load = provider.file.filename or provider.file.directory
         if to_load:
             for fn, bin in download_files(ctn, to_load):
+                _log.debug("fn=%s, bin(len)=%s", fn, len(bin))
                 if fn.endswith(".yml") or fn.endswith(".yaml"):
-                    loaded = TraefikConfig.model_validate(yaml.safe_load(bin))
+                    loaded = yaml.safe_load(bin)
                 elif fn.endswith(".toml"):
-                    loaded = TraefikConfig.model_validate(toml.loads(bin))
-                from_conf = from_conf.merge(loaded)
-    return from_args, from_conf
+                    loaded = toml.loads(bin)
+                _log.debug("load(dict): %s", loaded)
+                from_conf = from_conf.merge(TraefikConfig.model_validate(loaded))
+    return from_args, from_envs, from_conf
 
 
 def traefik_dump(client: docker.DockerClient):
     """extract traefik configuration"""
     from_conf = TraefikConfig()
     from_args = TraefikConfig()
+    from_envs = TraefikConfig()
     from_label = TraefikConfig()
     for ctn in client.containers.list():
         if "traefik" in ctn.image.tags[0]:
             _log.debug("traefik container: %s", ctn.name)
-            from_args, from_conf = traefik_container_config(ctn)
-            _log.debug("loaded: args=%s, conf=%s", from_args.model_dump(), from_conf.model_dump())
+            from_args, from_envs, from_conf = traefik_container_config(ctn)
+            _log.debug("loaded: args=%s, conf=%s", from_args, from_conf)
         if ctn.labels.get("traefik.enable") in ("true",):
             _log.debug("traefik enabled container: %s", ctn.name)
             host = ctn.name
@@ -172,7 +185,8 @@ def traefik_dump(client: docker.DockerClient):
     _log.debug("conf: %s", from_conf)
     _log.debug("arg: %s", from_args)
     _log.debug("label: %s", from_label)
-    res = from_conf.merge(from_args)
+    res = from_conf.merge(from_envs)
+    res = res.merge(from_args)
     res = res.merge(from_label)
     return res.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True)
 

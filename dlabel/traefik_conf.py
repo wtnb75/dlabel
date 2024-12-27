@@ -21,22 +21,24 @@ class Model(BaseModel):
         return __lower__(values)
 
     def merge(self, other: BaseModel):
+        if other is None:
+            return self
         _log.debug("merge: %s +  %s", self, other)
         obj = deepmerge(
             self.model_dump(**excludes), other.model_dump(**excludes))
         _log.debug("merged: %s", obj)
         return self.model_validate(obj)
 
-    def setbyaddr(self, address: str, value):
+    def setbyaddr(self, address: list[str], value):
         _log.debug("set(addr) %s -> %s", address, value)
         res = {}
         tgt = res
-        for k in address.split(".")[:-1]:
+        for k in address[:-1]:
             tgt[k] = {}
             tgt = tgt[k]
         if value == "true":
             value = {}
-        tgt[address.rsplit(".", 1)[-1]] = value
+        tgt[address[-1]] = value
         _log.debug("set-dict: %s", res)
         return self.merge(self.model_validate(res))
 
