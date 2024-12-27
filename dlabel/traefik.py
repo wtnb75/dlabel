@@ -5,7 +5,7 @@ import tarfile
 import yaml
 import toml
 from logging import getLogger
-from .traefik_conf import TraefikConfig, HttpMiddleware, HttpService
+from .traefik_conf import TraefikConfig, HttpMiddleware, HttpService, ProviderConfig
 
 _log = getLogger(__name__)
 
@@ -142,15 +142,22 @@ def traefik_container_config(ctn: docker.models.containers.Container):
         if env.startswith("TRAEFIK_") and "=" in env:
             k, v = env[8:].split("=", 1)
             from_envs = from_envs.setbyaddr(k.split("_"), v)
-    if from_args.providers and from_args.providers.file:
-        to_load = from_args.providers.file.filename or from_args.providers.file.directory
+    provider = ProviderConfig()
+    provider = provider.merge(from_args.providers)
+    provider = provider.merge(from_envs.providers)
+    _log.debug("provider config: %s (arg=%s, env=%s)", provider, from_args, from_envs)
+    if provider.file:
+        _log.debug("loading file: %s", provider.file)
+        to_load = provider.file.filename or provider.file.directory
         if to_load:
             for fn, bin in download_files(ctn, to_load):
+                _log.debug("fn=%s, bin(len)=%s", fn, len(bin))
                 if fn.endswith(".yml") or fn.endswith(".yaml"):
-                    loaded = TraefikConfig.model_validate(yaml.safe_load(bin))
+                    loaded = yaml.safe_load(bin)
                 elif fn.endswith(".toml"):
-                    loaded = TraefikConfig.model_validate(toml.loads(bin))
-                from_conf = from_conf.merge(loaded)
+                    loaded = toml.loads(bin)
+                _log.debug("load(dict): %s", loaded)
+                from_conf = from_conf.merge(TraefikConfig.model_validate(loaded))
     return from_args, from_envs, from_conf
 
 

@@ -21,6 +21,8 @@ class Model(BaseModel):
         return __lower__(values)
 
     def merge(self, other: BaseModel):
+        if other is None:
+            return self
         _log.debug("merge: %s +  %s", self, other)
         obj = deepmerge(
             self.model_dump(**excludes), other.model_dump(**excludes))
