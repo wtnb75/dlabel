@@ -195,6 +195,7 @@ class TestTraefikDump(unittest.TestCase):
                 "TRAEFIK_ENTRYPOINTS_web_ADDRESS=:80",
                 "TRAEFIK_PROVIDERS_DOCKER=true",
                 "TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT=false",
+                "PATH=/bin:/sbin",
             ], "1.2.3.4")
         ctn2 = self._container(
             "proj1_ctn2", "alpine:3",
