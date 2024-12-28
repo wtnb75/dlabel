@@ -70,13 +70,15 @@ def docker_option(func):
 @verbose_option
 @docker_option
 @format_option
-def summary(client: docker.DockerClient, output):
-    """show name and labels of containers"""
+def labels(client: docker.DockerClient, output):
+    """show labels"""
     res: list[dict] = []
     for ctn in client.containers.list():
+        image_labels = ctn.image.labels
         res.append({
             "name": ctn.name,
-            "labels": ctn.attrs["Config"]["Labels"]
+            "labels": {k: v for k, v in ctn.labels.items() if image_labels.get(k) != v},
+            "image_labels": image_labels,
         })
     return res
 

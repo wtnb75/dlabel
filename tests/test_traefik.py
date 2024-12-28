@@ -313,5 +313,55 @@ class TestTraefikDump(unittest.TestCase):
         self.assertEqual(expected, res)
 
 
+class TestTraefik2nginx(unittest.TestCase):
+    def test_traefik2nginx_empty(self):
+        traefik_config = {
+            "http": {
+                "routers": {},
+                "services": {},
+                "middlewares": {},
+            }
+        }
+        result = CliRunner().invoke(cli, ["traefik2nginx"], input=yaml.dump(traefik_config))
+        self.assertEqual(0, result.exit_code)
+        self.assertNotIn("location", result.output)
+
+    def test_traefik2nginx_simple(self):
+        traefik_config = {
+            "http": {
+                "routers": {
+                    "r1": {
+                        "rule": "PathPrefix(`/hello`)",
+                        "middlewares": ["m1"],
+                    }
+                },
+                "services": {
+                    "r1": {
+                        "loadbalancer": {
+                            "server": {
+                                "host": "hostname",
+                                "ipaddr": "1.2.3.4",
+                                "port": "9999",
+                            }
+                        }
+                    }
+                },
+                "middlewares": {
+                    "m1": {
+                        "stripprefix": {
+                            "prefixes": ["/hello"],
+                        }
+                    }
+                },
+            }
+        }
+        result = CliRunner().invoke(cli, ["traefik2nginx"], input=yaml.dump(traefik_config))
+        if result.exception:
+            raise result.exception
+        self.assertEqual(0, result.exit_code)
+        self.assertIn("location /hello", result.output)
+        self.assertIn("rewrite /hello(.*) /$1 break", result.output)
+
+
 if __name__ == '__main__':
     unittest.main()
