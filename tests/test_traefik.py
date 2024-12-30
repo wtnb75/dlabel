@@ -333,6 +333,9 @@ class TestTraefik2nginx(unittest.TestCase):
                     "r1": {
                         "rule": "PathPrefix(`/hello`)",
                         "middlewares": ["m1"],
+                    },
+                    "r2": {
+                        "rule": "Path(`/world`)",
                     }
                 },
                 "services": {
@@ -343,6 +346,15 @@ class TestTraefik2nginx(unittest.TestCase):
                                 "ipaddr": "1.2.3.4",
                                 "port": "9999",
                             }
+                        }
+                    },
+                    "r2": {
+                        "loadbalancer": {
+                            "servers": [{
+                                "url": "http://hostname1:9999",
+                            }, {
+                                "url": "http://hostname2:9999",
+                            }]
                         }
                     }
                 },
@@ -361,6 +373,75 @@ class TestTraefik2nginx(unittest.TestCase):
         self.assertEqual(0, result.exit_code)
         self.assertIn("location /hello", result.output)
         self.assertIn("rewrite /hello(.*) /$1 break", result.output)
+        self.assertIn("location = /world", result.output)
+        self.assertNotIn("rewrite /world", result.output)
+
+
+class TestTraefik2apache(unittest.TestCase):
+    def test_traefik2apache_empty(self):
+        traefik_config = {
+            "http": {
+                "routers": {},
+                "services": {},
+                "middlewares": {},
+            }
+        }
+        result = CliRunner().invoke(cli, ["traefik2apache"], input=yaml.dump(traefik_config))
+        if result.exception:
+            raise result.exception
+        self.assertEqual(0, result.exit_code)
+        self.assertNotIn("<Location", result.output)
+
+    def test_traefik2apache_simple(self):
+        traefik_config = {
+            "http": {
+                "routers": {
+                    "r1": {
+                        "rule": "PathPrefix(`/hello`)",
+                        "middlewares": ["m1"],
+                    },
+                    "r2": {
+                        "rule": "Path(`/world`)",
+                    }
+                },
+                "services": {
+                    "r1": {
+                        "loadbalancer": {
+                            "server": {
+                                "host": "hostname",
+                                "ipaddr": "1.2.3.4",
+                                "port": "9999",
+                            }
+                        }
+                    },
+                    "r2": {
+                        "loadbalancer": {
+                            "servers": [{
+                                "url": "http://hostname1:9999",
+                            }, {
+                                "url": "http://hostname2:9999",
+                            }]
+                        }
+                    }
+                },
+                "middlewares": {
+                    "m1": {
+                        "stripprefix": {
+                            "prefixes": ["/hello"],
+                        }
+                    }
+                },
+            }
+        }
+        result = CliRunner().invoke(cli, ["traefik2apache"], input=yaml.dump(traefik_config))
+        if result.exception:
+            raise result.exception
+        self.assertEqual(0, result.exit_code)
+        self.assertIn("<Location /hello>", result.output)
+        self.assertIn("<Proxy balancer://r2>", result.output)
+        self.assertIn("<Location ~ \"^/world$\"", result.output)
+        self.assertIn("  ProxyPass balancer://r2", result.output)
+        self.assertIn("  ProxyPass http://hostname:9999", result.output)
 
 
 if __name__ == '__main__':
