@@ -156,6 +156,9 @@ def traefik_container_config(ctn: docker.models.containers.Container):
                     loaded = yaml.safe_load(bin)
                 elif fn.endswith(".toml"):
                     loaded = toml.loads(bin)
+                else:
+                    _log.info("unknown format: %s", fn)
+                    continue
                 _log.debug("load(dict): %s", loaded)
                 from_conf = from_conf.merge(TraefikConfig.model_validate(loaded))
     return from_args, from_envs, from_conf
@@ -295,7 +298,7 @@ def traefik2apache(traefik_file, output, baseconf, server_name, ipaddr):
             if len(loc) == 1:
                 res.append(f"<Location {loc[0]}>")
             elif loc[0] == "=":
-                res.append(f"<Location ~ \"{re.escape(loc[1])}$\">")
+                res.append(f"<Location ~ \"^{re.escape(loc[1])}$\">")
             res.append(f"  ProxyPass {backend_to}")
             res.append(f"  ProxyPassReverse {backend_to}")
             res.append("</Location>")
