@@ -1,5 +1,7 @@
 import unittest
 import yaml
+import tomllib
+import tempfile
 from click.testing import CliRunner
 from unittest.mock import patch, MagicMock
 from dlabel.main import cli
@@ -12,6 +14,13 @@ class TestSimpleCLI(unittest.TestCase):
         container.labels = labels
         container.image.labels = image_labels
         return container
+
+    def test_help(self):
+        res = CliRunner().invoke(cli)
+        if res.exception:
+            raise res.exception
+        self.assertEqual(0, res.exit_code)
+        self.assertIn("traefik-dump", res.output)
 
     @patch("docker.from_env")
     def test_labels(self, dcl):
@@ -37,3 +46,29 @@ class TestSimpleCLI(unittest.TestCase):
         }]
         self.maxDiff = 100000
         self.assertEqual(expected, output)
+
+    def test_load(self):
+        data = {
+            "http": {
+                "middlewares": {},
+                "services": {
+                    "svc1": {
+                        "loadbalancer": {
+                            "servers": [{
+                                "url": "http://localhost",
+                            }]
+                        }
+                    }
+                },
+                "routers": {
+                    "svc1": {
+                        "service": "svc1",
+                    }
+                }
+            }
+        }
+        with tempfile.NamedTemporaryFile("r+") as tf:
+            yaml.dump(data, tf)
+            tf.flush()
+            res = CliRunner().invoke(cli, ["traefik-load", tf.name, "--format", "toml"])
+            self.assertEqual(data, tomllib.loads(res.output))

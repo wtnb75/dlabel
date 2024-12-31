@@ -277,7 +277,7 @@ class TestTraefikDump(unittest.TestCase):
                             'address': ':80',
                         }
                     }, }, conffile)
-            subprocess.call(["tar", "cf", dir / "xyz.tar", dir / "hello.yml"])
+            subprocess.check_call(["tar", "cf", dir / "xyz.tar", dir / "hello.yml"], stderr=subprocess.DEVNULL)
             bin.write((dir / "xyz.tar").read_bytes())
         bin.flush()
         bin.seek(0)
@@ -446,6 +446,8 @@ class TestTraefik2apache(unittest.TestCase):
         self.assertIn("<Location ~ \"^/world$\"", result.output)
         self.assertIn("  ProxyPass balancer://r2", result.output)
         self.assertIn("  ProxyPass http://hostname:9999", result.output)
+        self.assertIn("RewriteEngine On", result.output)
+        self.assertIn("RewriteRule /hello(.*) /$1", result.output)
 
 
 if __name__ == '__main__':

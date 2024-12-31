@@ -214,7 +214,7 @@ def srun(title: str, args: list[str]):
 
 
 def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf: str | None,
-                  server_url: str, ipaddr: bool, daemon: bool, interval: int,
+                  server_url: str, ipaddr: bool, interval: int, oneshot: bool,
                   test_cmd: list[str], boot_cmd: list[str], stop_cmd: list[str], reload_cmd: list[str]):
     import dictknife
     import atexit
@@ -226,12 +226,14 @@ def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf:
     # boot
     srun("boot", boot_cmd)
 
-    if daemon:
+    if not oneshot:
         @atexit.register
         def _():
             srun("exit", stop_cmd)
+    else:
+        return
 
-    while daemon:
+    while True:
         time.sleep(interval)
         newconfig = traefik_dump(client)
         if newconfig != config:
@@ -251,13 +253,13 @@ def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf:
 @webserver_option
 @click.option("--conffile", type=click.Path(), required=True)
 @click.option("--nginx", default="nginx", show_default=True)
-@click.option("--daemon/--foreground", default=True, show_default=True)
+@click.option("--oneshot/--forever", default=True, show_default=True)
 @click.option("--interval", type=int, default=10, show_default=True)
 @verbose_option
 def traefik_nginx_monitor(client: docker.DockerClient, baseconf: str, conffile: str, nginx: str,
-                          server_url: str, ipaddr: bool, daemon: bool, interval: int):
+                          server_url: str, ipaddr: bool, interval: int, oneshot: bool):
     webserver_run(client, traefik2nginx, conffile, baseconf, server_url,
-                  ipaddr, daemon, interval,
+                  ipaddr, interval, oneshot,
                   [nginx, "-c", conffile, "-t"],
                   [nginx, "-c", conffile],
                   [nginx, "-s", "quit"],
@@ -270,13 +272,13 @@ def traefik_nginx_monitor(client: docker.DockerClient, baseconf: str, conffile: 
 @webserver_option
 @click.option("--conffile", type=click.Path(), required=True)
 @click.option("--apache", default="httpd", show_default=True)
-@click.option("--daemon/--foreground", default=True, show_default=True)
+@click.option("--oneshot/--forever", default=True, show_default=True)
 @click.option("--interval", type=int, default=10, show_default=True)
 @verbose_option
 def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile: str, apache: str,
-                           server_url: str, ipaddr: bool, daemon: bool, interval: int):
+                           server_url: str, ipaddr: bool, interval: int, oneshot: bool):
     webserver_run(client, traefik2apache, conffile, baseconf, server_url,
-                  ipaddr, daemon, interval,
+                  ipaddr, interval, oneshot,
                   [apache, "-t"],
                   [apache],
                   [apache, "-k", "graceful-stop"],
