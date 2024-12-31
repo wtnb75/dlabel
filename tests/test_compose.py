@@ -10,6 +10,8 @@ class TestCompose(unittest.TestCase):
 
     def test_compose_help(self):
         result = CliRunner().invoke(compose, ["--help"])
+        if result.exception:
+            raise result.exception
         self.assertEqual(result.exit_code, 0)
         self.assertIn("--verbose", result.output)
         self.assertIn("--quiet", result.output)

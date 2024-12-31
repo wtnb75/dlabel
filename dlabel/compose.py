@@ -17,8 +17,8 @@ def envlist2map(env: list[str], sep: str = "=") -> dict[str, str]:
     return res
 
 
-def portmap2compose(pmap: dict) -> list[str]:
-    res = []
+def portmap2compose(pmap: dict) -> list[str | dict]:
+    res: list[str | dict] = []
     for k, v in pmap.items():
         ctport = k
         if ctport.endswith("/tcp") and len(v) == 1:
@@ -53,7 +53,7 @@ def convdict_differ(
             todict[v] = dict_ctn[k]
 
 
-def copy_files(ctn: docker.models.containers.Container, src: str, dst: str):
+def copy_files(ctn: docker.models.containers.Container, src: str | Path, dst: str | Path):
     def tfilter(member, path):
         res = tarfile.data_filter(member, path)
         if res:
@@ -64,7 +64,7 @@ def copy_files(ctn: docker.models.containers.Container, src: str, dst: str):
 
     _log.info("copy %s:%s -> %s", ctn.name, src, dst)
     odir = Path(dst)
-    bin, arc = ctn.get_archive(src)
+    bin, arc = ctn.get_archive(str(src))
     _log.debug("arc=%s", arc)
     bio = io.BytesIO()
     for x in bin:
@@ -86,7 +86,7 @@ def compose(client: docker.DockerClient, output, all, project, volume):   # noqa
     """generate docker-compose.yml from running containers"""
     svcs = {}
     vols = {}
-    nets = {}
+    nets: dict[str, Any] = {}
     for ctn in client.containers.list():
         config = ctn.attrs.get("Config", {})
         hostconfig = ctn.attrs.get("HostConfig", {})
@@ -122,37 +122,39 @@ def compose(client: docker.DockerClient, output, all, project, volume):   # noqa
             src = Path(v[0])
             dest = v[1]
             if src.is_relative_to(wdir):
-                src = "./" + str(src.relative_to(wdir))
+                srcstr = "./" + str(src.relative_to(wdir))
+            else:
+                srcstr = str(src)
             if len(v) == 2 or v[2] == "rw":
-                cvols.append(f"{src}:{dest}")
+                cvols.append(f"{srcstr}:{dest}")
             elif len(v) == 3:
-                cvols.append(f"{src}:{dest}:{v[2]}")
-            if output and volume and isinstance(src, str) and src.startswith("./"):
-                copy_files(ctn, dest, Path(output) / src)
+                cvols.append(f"{srcstr}:{dest}:{v[2]}")
+            if output and volume and srcstr.startswith("./"):
+                copy_files(ctn, dest, Path(output) / srcstr)
             elif output:
-                _log.info("skip copy: %s:%s -> %s", name, dest, src)
+                _log.info("skip copy: %s:%s -> %s", name, dest, srcstr)
         for m in hostconfig.get("Mounts", []):
             if imgvol and m.get("Target") in imgvol:
                 continue
             volname = m.get("Source")
-            if volname.startswith(proj+"_"):
-                volname = volname[len(proj)+1:]
+            if proj and volname.startswith(proj + "_"):
+                volname = volname[len(proj) + 1:]
             if m.get("Type") == "volume":
                 vols[volname] = m.get("VolumeOptions", {})
             if m.get("Target"):
                 cvols.append(f"{volname}:{m['Target']}")
-        nwmode = None
+        nwmode: str | None = None
         cnws = []
         if not proj or hostconfig.get("NetworkMode") != f"{proj}_default":
             nwmode = hostconfig.get("NetworkMode")
-        if nwmode not in (None, "host", "none"):
+        if isinstance(nwmode, str) and nwmode not in ("host", "none"):
             nets[nwmode] = {}
             cnws.append(nwmode)
             nwmode = None
         svc = {
             "image": config.get("Image"),
         }
-        if proj and not ctn.name.startswith(proj+"_"):
+        if proj and not ctn.name.startswith(proj + "_"):
             svc["container_name"] = ctn.name
         if nwmode:
             svc["network_mode"] = nwmode

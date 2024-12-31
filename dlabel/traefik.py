@@ -4,6 +4,7 @@ import io
 import tarfile
 import yaml
 import toml
+from pathlib import Path
 from logging import getLogger
 from .traefik_conf import TraefikConfig, HttpMiddleware, HttpService, ProviderConfig
 
@@ -17,13 +18,14 @@ def find_block(conf: list[dict], directive: str):
             yield c
 
 
-def find_server_block(conf: dict, server_name: str) -> list:
+def find_server_block(conf: dict, server_name: str) -> list | None:
     for conf in conf.get("config", []):
         for http in find_block(conf.get("parsed", []), "http"):
             for srv in find_block(http.get("block", []), "server"):
                 for name in find_block(srv.get("block", []), "server_name"):
                     if server_name in name.get("args", []):
                         return srv.get("block", [])
+    return None
 
 
 def middleware_compress(mdl: HttpMiddleware) -> list[dict]:
@@ -33,16 +35,17 @@ def middleware_compress(mdl: HttpMiddleware) -> list[dict]:
             "directive": "gzip",
             "args": ["on"],
         })
-        if mdl.compress.includedcontenttypes:
-            res.append({
-                "directive": "gzip_types",
-                "args": mdl.compress.includedcontenttypes,
-            })
-        if mdl.compress.minresponsebodybytes:
-            res.append({
-                "directive": "gzip_min_length",
-                "args": [mdl.compress.minresponsebodybytes],
-            })
+        if not isinstance(mdl.compress, bool):
+            if mdl.compress.includedcontenttypes:
+                res.append({
+                    "directive": "gzip_types",
+                    "args": mdl.compress.includedcontenttypes,
+                })
+            if mdl.compress.minresponsebodybytes:
+                res.append({
+                    "directive": "gzip_min_length",
+                    "args": [mdl.compress.minresponsebodybytes],
+                })
     return res
 
 
@@ -72,11 +75,11 @@ def middleware2nginx(mdlconf: list[HttpMiddleware]) -> list[dict]:
     for mdl in mdlconf:
         res.extend(middleware_compress(mdl))
         res.extend(middleware_headers(mdl))
-        if mdl.stripprefix:
+        if mdl.stripprefix and mdl.stripprefix.prefixes:
             del_prefix.extend([re.escape(x) for x in mdl.stripprefix.prefixes])
-        if mdl.stripprefixregex:
+        if mdl.stripprefixregex and mdl.stripprefixregex.regex:
             del_prefix.extend(mdl.stripprefixregex.regex)
-        if mdl.addprefix:
+        if mdl.addprefix and mdl.addprefix.prefix:
             add_prefix = mdl.addprefix.prefix
     if del_prefix or add_prefix != "/":
         res.append({
@@ -127,7 +130,9 @@ def download_files(ctn: docker.models.containers.Container, filename: str):
         for member in tar.getmembers():
             if member.isfile():
                 _log.debug("extract %s", member.name)
-                yield member.name, tar.extractfile(member).read()
+                tf = tar.extractfile(member)
+                if tf is not None:
+                    yield member.name, tf.read()
 
 
 def traefik_container_config(ctn: docker.models.containers.Container):
@@ -195,9 +200,11 @@ def traefik_dump(client: docker.DockerClient):
 
 
 def get_backend(svc: HttpService, ipaddr: bool = False) -> list[str]:
+    if svc.loadbalancer is None:
+        return []
     backend_urls = []
-    if svc.loadbalancer and svc.loadbalancer.servers:
-        backend_urls.extend([x.get("url").removeprefix("http://") for x in svc.loadbalancer.servers])
+    if svc.loadbalancer.servers:
+        backend_urls.extend([x.url.removeprefix("http://") for x in svc.loadbalancer.servers if x.url])
     if svc.loadbalancer.server and svc.loadbalancer.server.port:
         if ipaddr:
             backend_urls.append(f"{svc.loadbalancer.server.ipaddress}:{svc.loadbalancer.server.port}")
@@ -206,9 +213,11 @@ def get_backend(svc: HttpService, ipaddr: bool = False) -> list[str]:
     return backend_urls
 
 
-def traefik2nginx(traefik_file, output, baseconf, server_name, ipaddr):
+def traefik2nginx(traefik_file: dict | str, output: io.IOBase, baseconf: str | None, server_url: str, ipaddr: bool):
     """generate nginx configuration from traefik configuration"""
     import crossplane
+    import urllib.parse
+    ps = urllib.parse.urlparse(server_url, scheme="http", allow_fragments=False)
     if baseconf:
         nginx_confs = crossplane.parse(baseconf)
     else:
@@ -218,27 +227,33 @@ user nginx;
 worker_processes auto;
 error_log /dev/stderr notice;
 events {worker_connections 512;}
-http {server {server_name %s;}}
-""" % (server_name)
+http {server {listen %s default_server; server_name %s;}}
+""" % (ps.port or 80, ps.hostname)
         with tempfile.NamedTemporaryFile("r+") as tf:
             tf.write(minconf)
             tf.seek(0)
             nginx_confs = crossplane.parse(tf.name, combine=True)
-    target = find_server_block(nginx_confs, server_name)
+    target = find_server_block(nginx_confs, ps.hostname or "localhost")
     _log.debug("target: %s", target)
     assert target is not None
-    traefik_config = TraefikConfig.model_validate(yaml.safe_load(traefik_file))
-    services: dict[str, HttpService] | None = traefik_config.http.services
-    routers = traefik_config.http.routers
-    middlewares = traefik_config.http.middlewares
+    if isinstance(traefik_file, dict):
+        traefik_config = TraefikConfig.model_validate(traefik_file)
+    else:
+        traefik_config = TraefikConfig.model_validate(yaml.safe_load(traefik_file))
+    if not traefik_config.http:
+        raise Exception(f"http not defined: {traefik_config}")
+    services = traefik_config.http.services or {}
+    routers = traefik_config.http.routers or {}
+    middlewares = traefik_config.http.middlewares or {}
     _log.debug("all middlewares: %s", middlewares)
-    for location in set(traefik_config.http.services.keys()) & set(traefik_config.http.routers.keys()):
+    for location in set(services.keys()) & set(routers.keys()):
         route, svc = routers[location], services[location]
-        rule = route.rule
+        rule = route.rule or ""
         middleware_names = route.middlewares or []
         _log.debug("middleware_names: %s", middleware_names)
         location_keys = [rule2locationkey(x) for x in rule.split("||")]
-        middles: list[HttpMiddleware] = [middlewares.get(x.split("@", 1)[0]) for x in middleware_names]
+        middles: list[HttpMiddleware] = [i for i in [middlewares.get(
+            x.split("@", 1)[0]) for x in middleware_names] if i is not None]
         _log.debug("middles: %s", middles)
         backend_urls = get_backend(svc, ipaddr)
         target.append({
@@ -269,17 +284,45 @@ http {server {server_name %s;}}
         output.write("\n")
 
 
-def traefik2apache(traefik_file, output, baseconf, server_name, ipaddr):
-    """generate apache configuration from traefik configuration"""
-    traefik_config = TraefikConfig.model_validate(yaml.safe_load(traefik_file))
-    services = traefik_config.http.services
-    routers = traefik_config.http.routers
-    middlewares = traefik_config.http.middlewares
+def apache_insert2vf(base_conf: list[str], location_conf: list[str]) -> list[str]:
+    if "</VirtualHost>" in base_conf:
+        insert_to = base_conf.index("</VirtualHost>")
+        indent = len(base_conf[insert_to - 1]) - len(base_conf[insert_to - 1].lstrip())
+    else:
+        insert_to = len(base_conf)
+        indent = 0
+    _log.debug("insert to %s", insert_to)
+    return base_conf[:insert_to] + [""] + [" " * indent + x for x in location_conf] + [""] + base_conf[insert_to:]
+
+
+def traefik2apache(traefik_file: dict | str, output: io.IOBase, baseconf: str | None, server_url: str, ipaddr: bool):
+    """generate apache virtualhost configuration from traefik configuration"""
+    if baseconf:
+        apconf = Path(baseconf).read_text()
+    else:
+        import urllib.parse
+        ps = urllib.parse.urlparse(server_url, scheme="http", allow_fragments=False)
+        apconf = """
+<VirtualHost *:%s>
+    ServerName %s
+    ErrorLog /dev/stderr
+</VirtualHost>
+""" % (ps.port or 80, ps.hostname)
+
+    if isinstance(traefik_file, dict):
+        traefik_config = TraefikConfig.model_validate(traefik_file)
+    else:
+        traefik_config = TraefikConfig.model_validate(yaml.safe_load(traefik_file))
+    if not traefik_config.http:
+        raise Exception(f"http not defined: {traefik_config}")
+    services = traefik_config.http.services or {}
+    routers = traefik_config.http.routers or {}
+    middlewares = traefik_config.http.middlewares or {}
     _log.debug("all middlewares: %s", middlewares)
     res = []
     for location in set(services.keys()) & set(routers.keys()):
         route, svc = routers[location], services[location]
-        rule = route.rule
+        rule = route.rule or ""
         _log.debug("rules: %s", rule)
         middleware_names = route.middlewares or []
         _log.debug("middleware_names: %s", middleware_names)
@@ -303,4 +346,4 @@ def traefik2apache(traefik_file, output, baseconf, server_name, ipaddr):
             res.append(f"  ProxyPass {backend_to}")
             res.append(f"  ProxyPassReverse {backend_to}")
             res.append("</Location>")
-    print("\n".join(res), file=output)
+    print("\n".join(apache_insert2vf(apconf.splitlines(), res)), file=output)

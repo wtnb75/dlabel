@@ -14,6 +14,8 @@ class TestTraefikDump(unittest.TestCase):
 
     def test_traefik_dump_help(self):
         result = CliRunner().invoke(cli, ["traefik-dump", "--help"])
+        if result.exception:
+            raise result.exception
         self.assertEqual(result.exit_code, 0)
         self.assertIn("--verbose", result.output)
         self.assertIn("--quiet", result.output)
@@ -323,6 +325,8 @@ class TestTraefik2nginx(unittest.TestCase):
             }
         }
         result = CliRunner().invoke(cli, ["traefik2nginx"], input=yaml.dump(traefik_config))
+        if result.exception:
+            raise result.exception
         self.assertEqual(0, result.exit_code)
         self.assertNotIn("location", result.output)
 

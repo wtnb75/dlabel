@@ -92,8 +92,12 @@ class HttpLoadBalancerServer(Model):
     port: int | None = None
 
 
+class HttpLoadBalancerServers(Model):
+    url: str | None = None
+
+
 class HttpLoadBalancer(Model):
-    servers: list[dict] | None = None
+    servers: list[HttpLoadBalancerServers] | None = None
     server: HttpLoadBalancerServer | None = None
     sticky: dict[str, Any] | None = None
     healthcheck: dict[str, str] | None = None
