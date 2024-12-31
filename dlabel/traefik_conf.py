@@ -9,6 +9,8 @@ excludes = dict(exclude_none=True, exclude_defaults=True, exclude_unset=True)
 
 
 class Model(BaseModel):
+    """traefik configuration data model"""
+
     model_config = ConfigDict(extra="allow")
 
     @model_validator(mode="before")
@@ -31,7 +33,7 @@ class Model(BaseModel):
 
     def setbyaddr(self, address: list[str], value):
         _log.debug("set(addr) %s -> %s", address, value)
-        res = {}
+        res: dict[str, Any] = {}
         tgt = res
         for k in address[:-1]:
             tgt[k] = {}

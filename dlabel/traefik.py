@@ -49,6 +49,19 @@ def middleware_compress(mdl: HttpMiddleware) -> list[dict]:
     return res
 
 
+def middleware_compress_apache(mdl: HttpMiddleware) -> list[str]:
+    res = []
+    if mdl.compress:
+        if not isinstance(mdl.compress, bool):
+            if mdl.compress.includedcontenttypes:
+                res.append(f"AddOutputFilterByType DEFLATE {' '.join(mdl.compress.includedcontenttypes)}")
+            else:
+                res.append("SetOutputFilter DEFLATE")
+        else:
+            res.append("SetOutputFilter DEFLATE")
+    return res
+
+
 def middleware_headers(mdl: HttpMiddleware) -> list[dict]:
     res = []
     if mdl.headers:
@@ -64,6 +77,18 @@ def middleware_headers(mdl: HttpMiddleware) -> list[dict]:
                     "directive": "add_header",
                     "args": [k, v],
                 })
+    return res
+
+
+def middleware_headers_apache(mdl: HttpMiddleware) -> list[str]:
+    res = []
+    if mdl.headers:
+        if mdl.headers.customrequestheaders:
+            for k, v in mdl.headers.customrequestheaders.items():
+                res.append(f"RequestHeader append {k} {v}")
+        if mdl.headers.customresponseheaders:
+            for k, v in mdl.headers.customresponseheaders.items():
+                res.append(f"Header append {k} {v}")
     return res
 
 
@@ -295,6 +320,27 @@ def apache_insert2vf(base_conf: list[str], location_conf: list[str]) -> list[str
     return base_conf[:insert_to] + [""] + [" " * indent + x for x in location_conf] + [""] + base_conf[insert_to:]
 
 
+def middleware2apache(mdlconf: list[HttpMiddleware]) -> list[str]:
+    _log.debug("apply middleware: %s", mdlconf)
+    res = []
+    del_prefix = []
+    add_prefix = "/"
+    for mdl in mdlconf:
+        res.extend(middleware_compress_apache(mdl))
+        res.extend(middleware_headers_apache(mdl))
+        if mdl.stripprefix and mdl.stripprefix.prefixes:
+            del_prefix.extend([re.escape(x) for x in mdl.stripprefix.prefixes])
+        if mdl.stripprefixregex and mdl.stripprefixregex.regex:
+            del_prefix.extend(mdl.stripprefixregex.regex)
+        if mdl.addprefix and mdl.addprefix.prefix:
+            add_prefix = mdl.addprefix.prefix
+    if del_prefix or add_prefix != "/":
+        res.append("RewriteEngine On")
+        res.append(f"RewriteRule {'|'.join(del_prefix)}(.*) {add_prefix}$1")
+    _log.debug("middleware2apache result: %s -> %s", mdlconf, res)
+    return res
+
+
 def traefik2apache(traefik_file: dict | str, output: io.IOBase, baseconf: str | None, server_url: str, ipaddr: bool):
     """generate apache virtualhost configuration from traefik configuration"""
     if baseconf:
@@ -337,7 +383,10 @@ def traefik2apache(traefik_file: dict | str, output: io.IOBase, baseconf: str | 
                 res.append(f"  BalancerMember http://{b}")
             res.append("</Proxy>")
             backend_to = f"balancer://{location}"
-        # TODO: middleware
+        middles: list[HttpMiddleware] = [i for i in [middlewares.get(
+            x.split("@", 1)[0]) for x in middleware_names] if i is not None]
+        _log.debug("middles: %s", middles)
+        mdlconf = middleware2apache(middles)
         for loc in location_keys:
             if len(loc) == 1:
                 res.append(f"<Location {loc[0]}>")
@@ -345,5 +394,6 @@ def traefik2apache(traefik_file: dict | str, output: io.IOBase, baseconf: str | 
                 res.append(f"<Location ~ \"^{re.escape(loc[1])}$\">")
             res.append(f"  ProxyPass {backend_to}")
             res.append(f"  ProxyPassReverse {backend_to}")
+            res.extend([f"  {i}" for i in mdlconf])
             res.append("</Location>")
     print("\n".join(apache_insert2vf(apconf.splitlines(), res)), file=output)
