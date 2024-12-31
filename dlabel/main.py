@@ -3,6 +3,8 @@ import docker
 import click
 from logging import getLogger
 import sys
+import time
+import subprocess
 from .traefik import traefik2nginx, traefik2apache, traefik_dump
 from .compose import compose
 from .version import VERSION
@@ -65,6 +67,17 @@ def docker_option(func):
     return _
 
 
+def webserver_option(func):
+    @click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
+                  default=None, show_default=True)
+    @click.option("--server-url", default="http://localhost", show_default=True)
+    @click.option("--ipaddr/--hostname", default=False, show_default=True)
+    @functools.wraps(func)
+    def _(**kwargs):
+        return func(**kwargs)
+    return _
+
+
 @cli.command()
 @click.option("--output", type=click.File("w"), default="-", show_default=True)
 @verbose_option
@@ -114,10 +127,7 @@ def _compose(*args, **kwargs):
 @cli.command(traefik2nginx.__name__, help=traefik2nginx.__doc__)
 @click.option("--traefik-file", type=click.File("r"), default="-", show_default=True)
 @click.option("--output", type=click.File("w"), default="-", show_default=True)
-@click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
-              default=None, show_default=True)
-@click.option("--server-name", default="localhost", show_default=True)
-@click.option("--ipaddr/--hostname", default=False, show_default=True)
+@webserver_option
 @verbose_option
 def _traefik2nginx(*args, **kwargs):
     return traefik2nginx(*args, **kwargs)
@@ -126,10 +136,7 @@ def _traefik2nginx(*args, **kwargs):
 @cli.command(traefik2apache.__name__, help=traefik2apache.__doc__)
 @click.option("--traefik-file", type=click.File("r"), default="-", show_default=True)
 @click.option("--output", type=click.File("w"), default="-", show_default=True)
-@click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
-              default=None, show_default=True)
-@click.option("--server-name", default="localhost", show_default=True)
-@click.option("--ipaddr/--hostname", default=False, show_default=True)
+@webserver_option
 @verbose_option
 def _traefik2apache(*args, **kwargs):
     return traefik2apache(*args, **kwargs)
@@ -198,6 +205,83 @@ def traefik_load(input, strict):
     from .traefik_conf import TraefikConfig
     res = TraefikConfig.model_validate(yaml.safe_load(input), strict=strict)
     return res.model_dump(exclude_none=True, exclude_defaults=True, exclude_unset=True)
+
+
+def srun(title: str, args: list[str]):
+    _log.debug("run %s: %s", title, args)
+    cmdresult = subprocess.run(args, capture_output=True, check=True)
+    _log.debug("result %s: stdout=%s, stderr=%s", title, cmdresult.stdout, cmdresult.stderr)
+
+
+def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf: str | None,
+                  server_url: str, ipaddr: bool, daemon: bool, interval: int,
+                  test_cmd: list[str], boot_cmd: list[str], stop_cmd: list[str], reload_cmd: list[str]):
+    import dictknife
+    import atexit
+    config = traefik_dump(client)
+    with open(conffile, "w") as ngc:
+        conv_fn(config, ngc, baseconf, server_url, ipaddr)
+    # test config
+    srun("test", test_cmd)
+    # boot
+    srun("boot", boot_cmd)
+
+    if daemon:
+        @atexit.register
+        def _():
+            srun("exit", stop_cmd)
+
+    while daemon:
+        time.sleep(interval)
+        newconfig = traefik_dump(client)
+        if newconfig != config:
+            for d in dictknife.diff(config, newconfig):
+                _log.info("diff: %s", d)
+            _log.info("generate config")
+            with open(conffile, "w") as ngc:
+                conv_fn(newconfig, ngc, baseconf, server_url, ipaddr)
+            srun("test", test_cmd)
+            srun("reload", reload_cmd)
+        else:
+            _log.debug("not changed")
+
+
+@cli.command()
+@docker_option
+@webserver_option
+@click.option("--conffile", type=click.Path(), required=True)
+@click.option("--nginx", default="nginx", show_default=True)
+@click.option("--daemon/--foreground", default=True, show_default=True)
+@click.option("--interval", type=int, default=10, show_default=True)
+@verbose_option
+def traefik_nginx_monitor(client: docker.DockerClient, baseconf: str, conffile: str, nginx: str,
+                          server_url: str, ipaddr: bool, daemon: bool, interval: int):
+    webserver_run(client, traefik2nginx, conffile, baseconf, server_url,
+                  ipaddr, daemon, interval,
+                  [nginx, "-c", conffile, "-t"],
+                  [nginx, "-c", conffile],
+                  [nginx, "-s", "quit"],
+                  [nginx, "-s", "reload"]
+                  )
+
+
+@cli.command()
+@docker_option
+@webserver_option
+@click.option("--conffile", type=click.Path(), required=True)
+@click.option("--apache", default="httpd", show_default=True)
+@click.option("--daemon/--foreground", default=True, show_default=True)
+@click.option("--interval", type=int, default=10, show_default=True)
+@verbose_option
+def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile: str, apache: str,
+                           server_url: str, ipaddr: bool, daemon: bool, interval: int):
+    webserver_run(client, traefik2apache, conffile, baseconf, server_url,
+                  ipaddr, daemon, interval,
+                  [apache, "-t"],
+                  [apache],
+                  [apache, "-k", "graceful-stop"],
+                  [apache, "-k", "graceful"]
+                  )
 
 
 if __name__ == "__main__":
