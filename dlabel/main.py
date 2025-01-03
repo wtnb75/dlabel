@@ -207,10 +207,10 @@ def traefik_load(input, strict):
     return res.model_dump(exclude_none=True, exclude_defaults=True, exclude_unset=True)
 
 
-def srun(title: str, args: list[str]):
-    _log.debug("run %s: %s", title, args)
-    cmdresult = subprocess.run(args, capture_output=True, check=True)
-    _log.debug("result %s: stdout=%s, stderr=%s", title, cmdresult.stdout, cmdresult.stderr)
+def srun(title: str, args: list[str], capture_output=True):
+    _log.info("run %s: %s", title, args)
+    cmdresult = subprocess.run(args, capture_output=capture_output, check=True)
+    _log.info("result %s: stdout=%s, stderr=%s", title, cmdresult.stdout, cmdresult.stderr)
 
 
 def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf: str | None,
@@ -224,7 +224,7 @@ def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf:
     # test config
     srun("test", test_cmd)
     # boot
-    srun("boot", boot_cmd)
+    srun("boot", boot_cmd, capture_output=False)
 
     if not oneshot:
         @atexit.register
@@ -234,9 +234,11 @@ def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf:
         return
 
     while True:
+        _log.debug("sleep %s", interval)
         time.sleep(interval)
         newconfig = traefik_dump(client)
         if newconfig != config:
+            _log.info("change detected")
             for d in dictknife.diff(config, newconfig):
                 _log.info("diff: %s", d)
             _log.info("generate config")
@@ -244,6 +246,7 @@ def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf:
                 conv_fn(newconfig, ngc, baseconf, server_url, ipaddr)
             srun("test", test_cmd)
             srun("reload", reload_cmd)
+            config = newconfig
         else:
             _log.debug("not changed")
 

@@ -1,0 +1,26 @@
+services:
+  top:
+    image: ghcr.io/wtnb75/dlabel:latest
+    build: .
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+    - dlabel
+    - traefik-nginx-monitor
+    - --forever
+    - --conffile
+    - /etc/nginx/nginx-monitor.conf
+  example:
+    image: nginx
+    labels:
+      traefik.enable: 'true'
+      traefik.http.middlewares.example.stripprefix.prefixes: /example/
+      traefik.http.routers.example.entrypoints: web
+      traefik.http.routers.example.middlewares: example
+      traefik.http.routers.example.rule: PathPrefix(`/example/`)
+      traefik.http.services.example.loadbalancer.server.port: '80'
+  op:
+    image: alpine:3
+    command:
+    - sleep
+    - infinity
