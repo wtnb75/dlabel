@@ -50,16 +50,11 @@ def middleware_compress(mdl: HttpMiddleware) -> list[dict]:
 
 
 def middleware_compress_apache(mdl: HttpMiddleware) -> list[str]:
-    res = []
     if mdl.compress:
-        if not isinstance(mdl.compress, bool):
-            if mdl.compress.includedcontenttypes:
-                res.append(f"AddOutputFilterByType DEFLATE {' '.join(mdl.compress.includedcontenttypes)}")
-            else:
-                res.append("SetOutputFilter DEFLATE")
-        else:
-            res.append("SetOutputFilter DEFLATE")
-    return res
+        if not isinstance(mdl.compress, bool) and mdl.compress.includedcontenttypes:
+            return [f"AddOutputFilterByType DEFLATE {' '.join(mdl.compress.includedcontenttypes)}"]
+        return ["SetOutputFilter DEFLATE"]
+    return []
 
 
 def middleware_headers(mdl: HttpMiddleware) -> list[dict]:
@@ -201,6 +196,9 @@ def traefik_dump(client: docker.DockerClient):
     from_envs = TraefikConfig()
     from_label = TraefikConfig()
     for ctn in client.containers.list():
+        if ctn.status != "running":
+            _log.debug("skip %s (not running: %s)", ctn.name, ctn.status)
+            continue
         if "traefik" in ctn.image.tags[0]:
             _log.debug("traefik container: %s", ctn.name)
             from_args, from_envs, from_conf = traefik_container_config(ctn)
