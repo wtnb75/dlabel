@@ -28,6 +28,7 @@ class TestTraefikDump(unittest.TestCase):
                    env: list[str], ipaddr: str | None = None):
         container = MagicMock()
         container.name = name
+        container.status = "running"
         container.labels = labels
         container.image.tags = [image_name]
         container.attrs = {
