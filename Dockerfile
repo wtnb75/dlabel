@@ -1,4 +1,4 @@
-FROM python:3-alpine as build
+FROM python:3-alpine AS build
 COPY . /app
 WORKDIR /app
 RUN pip install build
