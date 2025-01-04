@@ -28,4 +28,11 @@ jobs:
     - uses: wtnb75/actions/merge-pages@main
       with:
         dirs: "cover docs"
-        #pydist: dist
+        pydist: dist
+    - uses: wtnb75/actions/docker@main
+      with:
+        push: 'true'
+        context: .
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+        image-version: ${{ github.ref_name }}
