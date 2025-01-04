@@ -5,6 +5,10 @@ on:
     tags:
     - 'v*'
 
+permissions:
+  packages: write
+  id-token: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -34,3 +38,10 @@ jobs:
         username: ${{ secrets.TWINE_USERNAME }}
         password: ${{ secrets.TWINE_PASSWORD }}
         file: dist/${{ steps.wheel.outputs.filename }}
+    - uses: wtnb75/actions/docker@main
+      with:
+        push: 'true'
+        context: .
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+        image-version: ${{ github.ref_name }}
