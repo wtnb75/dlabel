@@ -33,7 +33,7 @@ jobs:
     - uses: wtnb75/actions/merge-pages@main
       with:
         dirs: "cover docs"
-        pydist: dist
+        #pydist: dist
     - name: Setup Pages
       uses: actions/configure-pages@v4
     - name: deploy pages
