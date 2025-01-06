@@ -107,6 +107,14 @@ class TestCompose(unittest.TestCase):
                 "Target": "/db",
                 "Source": "proj1_db",
             }],
+            "PortBindings": {
+                "8080/tcp": [{"HostPort": "8080"}],
+                "443/udp": [{"HostPort": "443"}],
+                "8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8888", }],
+            },
+            "RestartPolicy": {
+                "Name": "always",
+            }
         }
         dcl.return_value.containers.list.return_value = [ctn1, ctn2]
         result = CliRunner().invoke(compose, ["--project", "proj1"])
@@ -130,6 +138,12 @@ class TestCompose(unittest.TestCase):
                         "env2": "value2=ext2",
                     },
                     "volumes": ["./data:/data", "/home/dir2/data2:/data2:ro", "db:/db"],
+                    "ports": [
+                        "8080:8080",
+                        {"target": 443, "published": 443, "protocol": "udp", "mode": "host"},
+                        "127.0.0.1:8888:8888"
+                    ],
+                    "restart": "always",
                 }
             },
             "volumes": {"db": {}}

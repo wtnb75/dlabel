@@ -3,7 +3,8 @@ import yaml
 import tomllib
 import tempfile
 from click.testing import CliRunner
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, ANY
+from docker.errors import ImageNotFound
 from dlabel.main import cli
 
 
@@ -44,7 +45,6 @@ class TestSimpleCLI(unittest.TestCase):
             "labels": {},
             "image_labels": {}
         }]
-        self.maxDiff = 100000
         self.assertEqual(expected, output)
 
     def test_load(self):
@@ -72,3 +72,19 @@ class TestSimpleCLI(unittest.TestCase):
             tf.flush()
             res = CliRunner().invoke(cli, ["traefik-load", tf.name, "--format", "toml"])
             self.assertEqual(data, tomllib.loads(res.output))
+
+    @patch("docker.from_env")
+    def test_tar_volume(self, dcl):
+        dcl.return_value.volumes.get.return_value.id = "volid1"
+        dcl.return_value.images.get.side_effect = ImageNotFound("image not found")
+        dcl.return_value.images.pull.return_value = "img"
+        dcl.return_value.containers.create.return_value.get_archive.return_value = ([b"binary data"], None)
+        res = CliRunner().invoke(cli, ["tar-volume", "vol1", "--verbose"])
+        if res.exception:
+            raise res.exception
+        self.assertEqual("binary data", res.output)
+        dcl.assert_called_once_with()
+        dcl.return_value.images.get.assert_called_once_with("hello-world")
+        dcl.return_value.images.pull.assert_called_once_with("hello-world")
+        dcl.return_value.containers.create.assert_called_once_with("img", mounts=ANY)
+        dcl.return_value.containers.create.return_value.get_archive.assert_called_once_with(ANY, encode_stream=False)

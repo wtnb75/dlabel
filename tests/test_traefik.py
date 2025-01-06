@@ -337,7 +337,7 @@ class TestTraefik2nginx(unittest.TestCase):
                 "routers": {
                     "r1": {
                         "rule": "PathPrefix(`/hello`)",
-                        "middlewares": ["m1"],
+                        "middlewares": ["m1", "m2", "m3"],
                     },
                     "r2": {
                         "rule": "Path(`/world`)",
@@ -368,6 +368,22 @@ class TestTraefik2nginx(unittest.TestCase):
                         "stripprefix": {
                             "prefixes": ["/hello"],
                         }
+                    },
+                    "m2": {
+                        "compress": {
+                            "includedcontenttypes": ["text/html", "text/plain"],
+                            "minresponsebodybytes": 1024,
+                        },
+                    },
+                    "m3": {
+                        "headers": {
+                            "customrequestheaders": {
+                                "x-reqheader1": "value1req"
+                            },
+                            "customresponseheaders": {
+                                "x-resheader1": "value1res"
+                            }
+                        }
                     }
                 },
             }
@@ -380,6 +396,11 @@ class TestTraefik2nginx(unittest.TestCase):
         self.assertIn("rewrite /hello(.*) /$1 break", result.output)
         self.assertIn("location = /world", result.output)
         self.assertNotIn("rewrite /world", result.output)
+        self.assertIn("gzip on;", result.output)
+        self.assertIn("gzip_types text/html text/plain;", result.output)
+        self.assertIn("gzip_min_length 1024;", result.output)
+        self.assertIn("proxy_set_header x-reqheader1 value1req;", result.output)
+        self.assertIn("add_header x-resheader1 value1res;", result.output)
 
 
 class TestTraefik2apache(unittest.TestCase):
@@ -403,7 +424,7 @@ class TestTraefik2apache(unittest.TestCase):
                 "routers": {
                     "r1": {
                         "rule": "PathPrefix(`/hello`)",
-                        "middlewares": ["m1"],
+                        "middlewares": ["m1", "m2", "m3"],
                     },
                     "r2": {
                         "rule": "Path(`/world`)",
@@ -434,6 +455,22 @@ class TestTraefik2apache(unittest.TestCase):
                         "stripprefix": {
                             "prefixes": ["/hello"],
                         }
+                    },
+                    "m2": {
+                        "compress": {
+                            "includedcontenttypes": ["text/html", "text/plain"],
+                            "minresponsebodybytes": 1024,
+                        },
+                    },
+                    "m3": {
+                        "headers": {
+                            "customrequestheaders": {
+                                "x-reqheader1": "value1req"
+                            },
+                            "customresponseheaders": {
+                                "x-resheader1": "value1res"
+                            }
+                        }
                     }
                 },
             }
@@ -449,6 +486,9 @@ class TestTraefik2apache(unittest.TestCase):
         self.assertIn("  ProxyPass http://hostname:9999", result.output)
         self.assertIn("RewriteEngine On", result.output)
         self.assertIn("RewriteRule /hello(.*) /$1", result.output)
+        self.assertIn("AddOutputFilterByType DEFLATE text/html text/plain", result.output)
+        self.assertIn("RequestHeader append x-reqheader1 value1req", result.output)
+        self.assertIn("Header append x-resheader1 value1res", result.output)
 
 
 if __name__ == '__main__':
