@@ -44,7 +44,7 @@ def middleware_compress(mdl: HttpMiddleware) -> list[dict]:
             if mdl.compress.minresponsebodybytes:
                 res.append({
                     "directive": "gzip_min_length",
-                    "args": [mdl.compress.minresponsebodybytes],
+                    "args": [str(mdl.compress.minresponsebodybytes)],
                 })
     return res
 

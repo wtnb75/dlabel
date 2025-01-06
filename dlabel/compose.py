@@ -33,7 +33,7 @@ def portmap2compose(pmap: dict) -> list[str | dict]:
             target, protocol = k.split("/", 1)
             res.append({
                 "target": int(target),
-                "published": v[0].get("HostPort"),
+                "published": int(v[0].get("HostPort")),
                 "protocol": protocol,
                 "mode": "host",
             })
