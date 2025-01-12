@@ -5,6 +5,10 @@ from logging import getLogger
 import sys
 import time
 import subprocess
+import fnmatch
+import io
+import tarfile
+from pathlib import Path
 from .traefik import traefik2nginx, traefik2apache, traefik_dump
 from .compose import compose
 from .version import VERSION
@@ -63,6 +67,29 @@ def docker_option(func):
         else:
             cl = docker.DockerClient(base_url=host)
         return func(client=cl, **kwargs)
+
+    return _
+
+
+def container_option(func):
+    @docker_option
+    @click.option("--name")
+    @click.option("--id")
+    @functools.wraps(func)
+    def _(client: docker.DockerClient, name: str, id: str, **kwargs):
+        if not name and not id:
+            click.echo("id name image")
+            for ctn in client.containers.list():
+                click.echo(f"{ctn.short_id} {ctn.name} {ctn.image.tags}")
+            return
+        if id:
+            ctn = client.containers.get(id)
+        elif name:
+            ctnlist = client.containers.list(filters={"name": name})
+            if len(ctnlist) != 1:
+                raise FileNotFoundError(f"container named {name} not found({len(ctnlist)})")
+            ctn = ctnlist[0]
+        return func(client=client, container=ctn, **kwargs)
 
     return _
 
@@ -287,6 +314,173 @@ def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile:
                   [apache, "-k", "graceful-stop"],
                   [apache, "-k", "graceful"]
                   )
+
+
+# https://pkg.go.dev/io/fs#ModeDir
+modebits = {
+    "dir": 1 << 31,
+    "append": 1 << 30,
+    "exclusive": 1 << 29,
+    "temporary": 1 << 28,
+    "symlink": 1 << 27,
+    "device": 1 << 26,
+    "namedpipe": 1 << 25,
+    "socket": 1 << 24,
+    "setuid": 1 << 23,
+    "setgid": 1 << 22,
+    "chardev": 1 << 21,
+    "sticky": 1 << 20,
+    "irregular": 1 << 19,
+}
+nonreg = {"dir", "device", "namedpipe", "socket", "chardev", "irregular"}
+
+
+def special_modes(mode: int) -> tuple[set[str], int]:
+    res: set[str] = set()
+    for k, v in modebits.items():
+        if (mode & v) != 0:
+            res.add(k)
+    return res, (mode & 0o777)
+
+
+def download_files(ctn: docker.models.containers.Container, filename: str):
+    bins, stat = ctn.get_archive(filename)
+    is_dir = "dir" in special_modes(stat["mode"])[0]
+    _log.debug("download %s: %s", filename, stat)
+    fp = io.BytesIO()
+    for chunk in bins:
+        fp.write(chunk)
+    fp.seek(0)
+    with tarfile.open(fileobj=fp) as tar:
+        for member in tar.getmembers():
+            if member.isfile():
+                _log.debug("extract %s", member.name)
+                tf = tar.extractfile(member)
+                if tf is not None:
+                    yield is_dir, member, tf.read()
+
+
+def get_archives(container: docker.models.containers.Container, names: set[str], outpath: str, ignore: list[str]):
+    outarchive = tarfile.open(outpath, "w:gz")
+    for fn in sorted(names):
+        _log.debug("extract: %s", fn)
+        for is_dir, tinfo, bin in download_files(container, fn):
+            if is_dir:
+                tinfo.name = str(Path(fn) / tinfo.name).lstrip("/")
+            else:
+                tinfo.name = fn.lstrip("/")
+            if is_match(ignore, tinfo.name):
+                _log.debug("ignore: %s", tinfo.name)
+                continue
+            outarchive.addfile(tinfo, io.BytesIO(bin))
+    outarchive.close()
+
+
+def is_match(patterns: list[str], target: str) -> bool:
+    for p in patterns:
+        if fnmatch.fnmatch(target, p):
+            return True
+    return False
+
+
+def is_already(prev: set[str], target: str) -> bool:
+    for p in prev:
+        if Path(p) in Path(target).parents:
+            return True
+    return False
+
+
+def do_kind0(modified: set[str], path: str, link: dict[str, str], container: docker.models.containers.Container):   # modified
+    _, stats = container.get_archive(path)
+    _log.debug("stats %s: %s", path, stats)
+    special, _ = special_modes(stats["mode"])
+    if nonreg & special:
+        _log.debug("skip: %s %s", path, special)
+    elif "symlink" in special and stats["linkTarget"]:
+        link[path] = stats["linkTarget"]
+    else:
+        modified.add(path)
+
+
+def do_kind1(added: set[str], path: str, link: dict[str, str], container: docker.models.containers.Container):   # added
+    if is_already(added, path):
+        _log.debug("skip(parent-exists): %s", path)
+    else:
+        _, stats = container.get_archive(path)
+        _log.debug("stats %s: %s", path, stats)
+        special, _ = special_modes(stats["mode"])
+        if (nonreg-{"dir"}) & special:
+            _log.debug("skip: %s %s", path, special)
+        elif "symlink" in special and stats["linkTarget"]:
+            link[path] = stats["linkTarget"]
+        else:
+            added.add(path)
+
+
+def do_kind2(deleted: set[str], path: str):  # deleted
+    if is_already(deleted, path):
+        _log.debug("skip(parent-exists): %s", path)
+    else:
+        deleted.add(path)
+
+
+def get_diff(container: docker.models.containers.Container, ignore: list[str]) -> \
+        tuple[set[str], set[str], set[str], dict[str, str]]:
+    deleted: set[str] = set()
+    added: set[str] = set()
+    modified: set[str] = set()
+    link: dict[str, str] = {}
+    for pathkind in container.diff():
+        path = pathkind["Path"]
+        kind = pathkind["Kind"]
+        if is_match(ignore, path):
+            _log.debug("ignore: %s", path)
+            continue
+        if kind == 2:  # deleted
+            do_kind2(deleted, path)
+        elif kind == 1:  # added
+            do_kind1(added, path, link, container)
+        elif kind == 0:  # modified
+            do_kind0(modified, path, link, container)
+    _log.debug("deleted: %s", deleted)
+    _log.debug("added: %s", added)
+    _log.debug("modified: %s", modified)
+    _log.debug("link: %s", link)
+    return deleted, added, modified, link
+
+
+@cli.command()
+@verbose_option
+@container_option
+@click.option("--output", type=click.Path(dir_okay=True))
+@click.option("--ignore", multiple=True)
+def make_dockerfile(client: docker.DockerClient, container: docker.models.containers.Container, output, ignore):
+    import shlex
+    deleted, added, modified, link = get_diff(container, ignore)
+    if output:
+        Path(output).mkdir(exist_ok=True)
+        ofp = (Path(output) / "Dockerfile").open("w")
+        (Path(output) / ".dockerignore").write_text("""
+*
+!added.tar.gz
+!modified.tar.gz
+""")
+    else:
+        ofp = sys.stdout
+    print(f"FROM {container.image.tags[0]}", file=ofp)
+    if deleted:
+        print("RUN rm -rf " + shlex.join(deleted), file=ofp)
+    if added:
+        if output:
+            get_archives(container, added, Path(output) / "added.tar.gz", ignore)
+        print("ADD added.tar.gz /", file=ofp)
+    if modified:
+        if output:
+            get_archives(container, modified, Path(output) / "modified.tar.gz", ignore)
+        print("ADD modified.tar.gz /", file=ofp)
+    if link:
+        for k, v in link.items():
+            print(f"RUN ln -sf {shlex.quote(v)} {shlex.quote(k)}", file=ofp)
 
 
 if __name__ == "__main__":
