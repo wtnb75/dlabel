@@ -282,7 +282,7 @@ class TestTraefikDump(unittest.TestCase):
             bin.write((dir / "xyz.tar").read_bytes())
         bin.flush()
         bin.seek(0)
-        ctn1.get_archive.return_value = ([bin.getvalue()], "dummy(stat)")
+        ctn1.get_archive.return_value = ([bin.getvalue()], {"mode": 0o755})
         dcl.return_value.containers.list.return_value = [ctn1, ctn2]
         result = CliRunner().invoke(cli, ["traefik-dump"])
         if result.exception:
