@@ -390,7 +390,8 @@ def is_already(prev: set[str], target: str) -> bool:
     return False
 
 
-def do_kind0(modified: set[str], path: str, link: dict[str, str], container: docker.models.containers.Container):   # modified
+def do_kind0(modified: set[str], path: str, link: dict[str, str],
+             container: docker.models.containers.Container):   # modified
     _, stats = container.get_archive(path)
     _log.debug("stats %s: %s", path, stats)
     special, _ = special_modes(stats["mode"])
@@ -402,7 +403,8 @@ def do_kind0(modified: set[str], path: str, link: dict[str, str], container: doc
         modified.add(path)
 
 
-def do_kind1(added: set[str], path: str, link: dict[str, str], container: docker.models.containers.Container):   # added
+def do_kind1(added: set[str], path: str, link: dict[str, str],
+             container: docker.models.containers.Container):   # added
     if is_already(added, path):
         _log.debug("skip(parent-exists): %s", path)
     else:
