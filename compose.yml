@@ -1,5 +1,13 @@
 services:
-  top:
+  traefik:
+    image: traefik:v2
+    volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+    - "--providers.docker=true"
+    - "--providers.docker.exposedbydefault=false"
+    - "--entrypoints.web.address=:80"
+  nginx:
     image: ghcr.io/wtnb75/dlabel:latest
     build: .
     volumes:
@@ -19,8 +27,17 @@ services:
       traefik.http.routers.example.middlewares: example
       traefik.http.routers.example.rule: PathPrefix(`/example/`)
       traefik.http.services.example.loadbalancer.server.port: '80'
+  httpbin:
+    image: mccutchen/go-httpbin
+    labels:
+      traefik.enable: 'true'
+      traefik.http.middlewares.httpbin.stripprefix.prefixes: /httpbin/
+      traefik.http.routers.httpbin.entrypoints: web
+      traefik.http.routers.httpbin.middlewares: httpbin
+      traefik.http.routers.httpbin.rule: PathPrefix(`/httpbin/`)
+      traefik.http.services.httpbin.loadbalancer.server.port: '8080'
   op:
-    image: alpine:3
+    image: alpine/curl
     command:
     - sleep
     - infinity

@@ -317,10 +317,11 @@ def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile:
                   )
 
 
-def get_archives(container: docker.models.containers.Container, names: set[str], outpath: str, ignore: list[str]):
+def get_archives(container: docker.models.containers.Container, names: set[str], outpath: str, ignore: list[str],
+                 mode: str = "w:gz"):
     if not names:
         return
-    outarchive = tarfile.open(outpath, "w:gz")
+    outarchive = tarfile.open(outpath, mode)
     for fn in sorted(names):
         _log.debug("extract: %s", fn)
         for is_dir, tinfo, bin in download_files(container, fn):
@@ -331,6 +332,7 @@ def get_archives(container: docker.models.containers.Container, names: set[str],
             if is_match(ignore, tinfo.name):
                 _log.debug("ignore: %s", tinfo.name)
                 continue
+            _log.debug("add file: %s (%s bytes) is_dir=%s", tinfo.name, len(bin), is_dir)
             outarchive.addfile(tinfo, io.BytesIO(bin))
     outarchive.close()
 
@@ -449,6 +451,39 @@ def make_dockerfile(client: docker.DockerClient, container: docker.models.contai
                 continue
             if image_labels.get(k) != v:
                 print(f"LABEL {shlex.quote(k)}={shlex.quote(v)}", file=ofp)
+
+
+@cli.command()
+@verbose_option
+@container_option
+@click.option("--sbom", type=click.Path(file_okay=True))
+@click.option("--collector", default="syft", show_default=True)
+@click.option("--checker", default="grype", show_default=True)
+@click.option("--ignore", multiple=True)
+def diff_sbom(client: docker.DockerClient, container: docker.models.containers.Container, ignore,
+              collector, sbom, checker):
+    """make SBOM and check Vulnerability of updated files in container"""
+    import tempfile
+    import tarfile
+    import subprocess
+    _log.info("get metadata: %s", container.name)
+    deleted, added, modified, link = get_diff(container, ignore)
+    with tempfile.TemporaryDirectory() as td:
+        tarfn = Path(td) / "files.tar"
+        rootdir = Path(td)/"root"
+        if sbom:
+            sbomfn = Path(sbom)
+        else:
+            sbomfn = Path(td) / "sbom.json"
+        _log.info("get diffs: %s+%s file/dirs", len(added), len(modified))
+        get_archives(container, added | modified, tarfn, ignore, "w")
+        _log.info("extract files: size=%s", tarfn.stat().st_size)
+        with tarfile.open(tarfn) as tf:
+            tf.extractall(rootdir, filter='data')
+        _log.info("generate sbom")
+        subprocess.check_call([collector, "scan", f"dir:{rootdir}", "-o", f"json={sbomfn}"])
+        _log.info("check vuln")
+        subprocess.check_call([checker, f"sbom:{sbomfn}"])
 
 
 if __name__ == "__main__":

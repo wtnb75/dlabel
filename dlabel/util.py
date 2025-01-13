@@ -34,8 +34,8 @@ def special_modes(mode: int) -> tuple[set[str], int]:
 
 def download_files(ctn: docker.models.containers.Container, filename: str):
     bins, stat = ctn.get_archive(filename)
-    is_dir = "dir" in special_modes(stat["mode"])
-    _log.debug("download %s: %s", filename, stat)
+    is_dir = "dir" in special_modes(stat["mode"])[0]
+    _log.debug("download %s: %s is_dir=%s", filename, stat, is_dir)
     fp = io.BytesIO()
     for chunk in bins:
         fp.write(chunk)
