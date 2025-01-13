@@ -413,7 +413,8 @@ def get_diff(container: docker.models.containers.Container, ignore: list[str]) -
 @container_option
 @click.option("--output", type=click.Path(dir_okay=True))
 @click.option("--ignore", multiple=True)
-def make_dockerfile(client: docker.DockerClient, container: docker.models.containers.Container, output, ignore):
+@click.option("--labels/--no-labels", default=False, show_default=True)
+def make_dockerfile(client: docker.DockerClient, container: docker.models.containers.Container, output, ignore, labels):
     import shlex
     deleted, added, modified, link = get_diff(container, ignore)
     if output:
@@ -426,9 +427,10 @@ def make_dockerfile(client: docker.DockerClient, container: docker.models.contai
 """)
     else:
         ofp = sys.stdout
-    print(f"FROM {container.image.tags[0]}", file=ofp)
+    from_image = container.attrs.get("Config", {}).get("Image")
+    print(f"FROM {from_image}", file=ofp)
     if deleted:
-        print("RUN rm -rf " + shlex.join(deleted), file=ofp)
+        print("RUN rm -rf " + shlex.join(sorted(deleted)), file=ofp)
     if added:
         if output:
             get_archives(container, added, Path(output) / "added.tar.gz", ignore)
@@ -438,8 +440,15 @@ def make_dockerfile(client: docker.DockerClient, container: docker.models.contai
             get_archives(container, modified, Path(output) / "modified.tar.gz", ignore)
         print("ADD modified.tar.gz /", file=ofp)
     if link:
-        for k, v in link.items():
+        for k, v in sorted(link.items()):
             print(f"RUN ln -sf {shlex.quote(v)} {shlex.quote(k)}", file=ofp)
+    if labels:
+        image_labels = container.image.labels
+        for k, v in container.labels.items():
+            if k.startswith("com.docker.compose."):
+                continue
+            if image_labels.get(k) != v:
+                print(f"LABEL {shlex.quote(k)}={shlex.quote(v)}", file=ofp)
 
 
 if __name__ == "__main__":
