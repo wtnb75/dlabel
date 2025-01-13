@@ -1,12 +1,12 @@
 import docker
 import re
 import io
-import tarfile
 import yaml
 import toml
 from pathlib import Path
 from logging import getLogger
 from .traefik_conf import TraefikConfig, HttpMiddleware, HttpService, ProviderConfig
+from .util import download_files
 
 _log = getLogger(__name__)
 
@@ -139,22 +139,6 @@ def traefik_label_config(labels: dict[str, str], host: str | None, ipaddr: str |
     return res
 
 
-def download_files(ctn: docker.models.containers.Container, filename: str):
-    bins, stat = ctn.get_archive(filename)
-    _log.debug("download %s: %s", filename, stat)
-    fp = io.BytesIO()
-    for chunk in bins:
-        fp.write(chunk)
-    fp.seek(0)
-    with tarfile.open(fileobj=fp) as tar:
-        for member in tar.getmembers():
-            if member.isfile():
-                _log.debug("extract %s", member.name)
-                tf = tar.extractfile(member)
-                if tf is not None:
-                    yield member.name, tf.read()
-
-
 def traefik_container_config(ctn: docker.models.containers.Container):
     from_args = TraefikConfig()
     from_envs = TraefikConfig()
@@ -175,14 +159,14 @@ def traefik_container_config(ctn: docker.models.containers.Container):
         _log.debug("loading file: %s", provider.file)
         to_load = provider.file.filename or provider.file.directory
         if to_load:
-            for fn, bin in download_files(ctn, to_load):
-                _log.debug("fn=%s, bin(len)=%s", fn, len(bin))
-                if fn.endswith(".yml") or fn.endswith(".yaml"):
+            for _, tinfo, bin in download_files(ctn, to_load):
+                _log.debug("fn=%s, bin(len)=%s", tinfo.name, len(bin))
+                if tinfo.name.endswith(".yml") or tinfo.name.endswith(".yaml"):
                     loaded = yaml.safe_load(bin)
-                elif fn.endswith(".toml"):
+                elif tinfo.name.endswith(".toml"):
                     loaded = toml.loads(bin)
                 else:
-                    _log.info("unknown format: %s", fn)
+                    _log.info("unknown format: %s", tinfo.name)
                     continue
                 _log.debug("load(dict): %s", loaded)
                 from_conf = from_conf.merge(TraefikConfig.model_validate(loaded))
