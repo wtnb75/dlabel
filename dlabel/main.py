@@ -318,6 +318,8 @@ def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile:
 
 
 def get_archives(container: docker.models.containers.Container, names: set[str], outpath: str, ignore: list[str]):
+    if not names:
+        return
     outarchive = tarfile.open(outpath, "w:gz")
     for fn in sorted(names):
         _log.debug("extract: %s", fn)
@@ -415,6 +417,7 @@ def get_diff(container: docker.models.containers.Container, ignore: list[str]) -
 @click.option("--ignore", multiple=True)
 @click.option("--labels/--no-labels", default=False, show_default=True)
 def make_dockerfile(client: docker.DockerClient, container: docker.models.containers.Container, output, ignore, labels):
+    """make Dockerfile from running container"""
     import shlex
     deleted, added, modified, link = get_diff(container, ignore)
     if output:
@@ -425,6 +428,8 @@ def make_dockerfile(client: docker.DockerClient, container: docker.models.contai
 !added.tar.gz
 !modified.tar.gz
 """)
+        get_archives(container, added, Path(output) / "added.tar.gz", ignore)
+        get_archives(container, modified, Path(output) / "modified.tar.gz", ignore)
     else:
         ofp = sys.stdout
     from_image = container.attrs.get("Config", {}).get("Image")
@@ -432,16 +437,11 @@ def make_dockerfile(client: docker.DockerClient, container: docker.models.contai
     if deleted:
         print("RUN rm -rf " + shlex.join(sorted(deleted)), file=ofp)
     if added:
-        if output:
-            get_archives(container, added, Path(output) / "added.tar.gz", ignore)
         print("ADD added.tar.gz /", file=ofp)
     if modified:
-        if output:
-            get_archives(container, modified, Path(output) / "modified.tar.gz", ignore)
         print("ADD modified.tar.gz /", file=ofp)
-    if link:
-        for k, v in sorted(link.items()):
-            print(f"RUN ln -sf {shlex.quote(v)} {shlex.quote(k)}", file=ofp)
+    for k, v in sorted(link.items()):
+        print(f"RUN ln -sf {shlex.quote(v)} {shlex.quote(k)}", file=ofp)
     if labels:
         image_labels = container.image.labels
         for k, v in container.labels.items():
