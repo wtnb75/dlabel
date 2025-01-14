@@ -6,6 +6,5 @@ RUN python -m build -w
 
 FROM python:3-alpine
 COPY --from=build /app/dist/dlabel*.whl /
-RUN ls -l /
-RUN pip install /dlabel*.whl paramiko
+RUN --mount=type=cache,mode=0755,target=/root/.cache/pip python -B -m pip install --no-compile /dlabel*.whl paramiko
 RUN apk add --no-cache nginx
