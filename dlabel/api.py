@@ -17,8 +17,9 @@ class CommonRoute(metaclass=ABCMeta):
     def __init__(self, client: docker.DockerClient):
         self.client = client
         self.router = APIRouter()
-        self.router.add_api_route("/", self.getroot, methods=["GET"])
-        self.router.add_api_route("/{path:path}", self.getsub, methods=["GET"])
+        kwargs = dict(response_model_exclude_none=True, response_model_exclude_unset=True)
+        self.router.add_api_route("/", self.getroot, methods=["GET"], **kwargs)
+        self.router.add_api_route("/{path:path}", self.getsub, methods=["GET"], **kwargs)
 
     @abstractmethod
     def getroot(self, **kwargs) -> dict:
@@ -40,7 +41,12 @@ class CommonRoute(metaclass=ABCMeta):
 
 class ComposeRoute(CommonRoute):
     def getroot(self, project: str | None = None) -> dict:
-        return compose(self.client, output=None, all=not bool(project), project=project, volume=False)
+        try:
+            g = compose(self.client, project=project, volume=False)
+            while True:
+                _ = next(g)
+        except StopIteration as e:
+            return e.value
 
     def getsub(self, path: str, project: str | None = None) -> Any:
         if path == "_tar":
