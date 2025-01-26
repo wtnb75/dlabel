@@ -141,7 +141,7 @@ class TestComposeRoute(unittest.TestCase):
             }
         }
         self.assertEqual(404, res.status_code)
-        self.assertEqual(expected, res.json())
+        self.assertDictEqual(expected, res.json())
 
 
 class TestTraefikRoute(unittest.TestCase):
@@ -382,7 +382,7 @@ class TestNginxRoute(unittest.TestCase):
         expected = self._setup_mock()
         res = self.client.get("/nginx/json")
         self.assertEqual(200, res.status_code)
-        self.assertEqual(expected, res.json())
+        self.assertDictEqual(expected, res.json())
 
     def test_json_subpath(self):
         self._setup_mock()
