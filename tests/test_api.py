@@ -1,8 +1,8 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, ANY
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from dlabel.api import ComposeRoute, TraefikRoute
+from dlabel.api import ComposeRoute, TraefikRoute, NginxRoute
 
 
 class TestComposeRoute(unittest.TestCase):
@@ -131,6 +131,18 @@ class TestComposeRoute(unittest.TestCase):
         self.assertIn("text/plain", res.headers.get("content-type"))
         self.assertEqual(expected["services"]["ctn1"]["image"], res.text)
 
+    def test_subpath_notfound(self):
+        self._setup_mock()
+        res = self.client.get("/compose/services/ctn1/notfound")
+        expected = {
+            "detail": {
+                "path": "services/ctn1/notfound",
+                "message": ANY,
+            }
+        }
+        self.assertEqual(404, res.status_code)
+        self.assertEqual(expected, res.json())
+
 
 class TestTraefikRoute(unittest.TestCase):
     def setUp(self):
@@ -198,24 +210,24 @@ class TestTraefikRoute(unittest.TestCase):
             }, [], [])
         self.docker_cl.containers.list.return_value = [ctn1, ctn2]
         expected = {
-            'api': {},
-            'http': {
-                'routers': {
-                    'ctn1': {
-                        'entrypoints': ['web'],
-                        'rule': 'Path(`/`)',
-                        'middlewares': ['mdl']},
-                    'ctn2': {
-                        'entrypoints': ['web'],
-                        'rule': 'PathPrefix(`/ctn2`)',
-                        'middlewares': ['mdl']}},
-                'services': {
-                    'ctn1': {
-                        'loadbalancer': {
-                            'server': {'host': 'proj1_ctn1', 'ipaddress': '1.2.3.4', 'port': 8080}}},
-                    'ctn2': {
-                        'loadbalancer': {
-                            'server': {'host': 'proj1_ctn2', 'ipaddress': '', 'port': 9999}}}}}}
+            "api": {},
+            "http": {
+                "routers": {
+                    "ctn1": {
+                        "entrypoints": ["web"],
+                        "rule": "Path(`/`)",
+                        "middlewares": ["mdl"]},
+                    "ctn2": {
+                        "entrypoints": ["web"],
+                        "rule": "PathPrefix(`/ctn2`)",
+                        "middlewares": ["mdl"]}},
+                "services": {
+                    "ctn1": {
+                        "loadbalancer": {
+                            "server": {"host": "proj1_ctn1", "ipaddress": "1.2.3.4", "port": 8080}}},
+                    "ctn2": {
+                        "loadbalancer": {
+                            "server": {"host": "proj1_ctn2", "ipaddress": "", "port": 9999}}}}}}
         return expected
 
     def test_label(self):
@@ -227,3 +239,153 @@ class TestTraefikRoute(unittest.TestCase):
         expected = self._setup_mock()
         res = self.client.get("/traefik/http/routers")
         self.assertEqual(expected["http"]["routers"], res.json())
+
+
+class TestNginxRoute(unittest.TestCase):
+    def setUp(self):
+        self.docker_cl = MagicMock()
+        self.api = FastAPI()
+        self.api.include_router(NginxRoute(self.docker_cl).router, prefix="/nginx")
+        self.client = TestClient(self.api)
+
+    def tearDown(self):
+        del self.docker_cl
+        del self.client
+        del self.api
+
+    def _container(self, name, image_name, labels: dict[str, str], args: list[str],
+                   env: list[str], ipaddr: str | None = None):
+        container = MagicMock()
+        container.name = name
+        container.status = "running"
+        container.labels = labels
+        container.image.tags = [image_name]
+        container.attrs = {
+            "Config": {
+                "Labels": labels,
+                "Image": image_name,
+                "Env": env,
+                "Cmd": args,
+            },
+            "NetworkSettings": {
+                "Networks": {},
+            },
+            "Args": args[1:],
+        }
+        if ipaddr:
+            container.attrs["NetworkSettings"]["Networks"] = {"xyz": {"IPAddress": "1.2.3.4"}}
+        return container
+
+    def _setup_mock(self):
+        ctn1 = self._container(
+            "proj1_ctn1", "alpine:3",
+            {
+                "label123": "valule123",
+                "traefik.enable": "true",
+                "traefik.http.routers.ctn1.entrypoints": "web",
+                "traefik.http.routers.ctn1.middlewares": "mdl",
+                "traefik.http.routers.ctn1.rule": "Path(`/`)",
+                "traefik.http.services.ctn1.loadbalancer.server.port": "8080",
+            }, [], [], "1.2.3.4")
+        ctn2 = self._container(
+            "proj1_ctn2", "alpine:3",
+            {
+                "label234": "valule234",
+                "traefik.enable": "true",
+                "traefik.http.routers.ctn2.entrypoints": "web",
+                "traefik.http.routers.ctn2.middlewares": "mdl",
+                "traefik.http.routers.ctn2.rule": "PathPrefix(`/ctn2`)",
+                "traefik.http.services.ctn2.loadbalancer.server.port": "9999",
+                "traefik.api": "true",
+            }, [], [])
+        self.docker_cl.containers.list.return_value = [ctn1, ctn2]
+        expected = {
+            "status": "ok",
+            "errors": [],
+            "config": [{
+                "file": ANY,
+                "status": "ok",
+                "errors": [],
+                "parsed": [{
+                    "file": ANY, "line": ANY,
+                    "directive": "user",
+                    "args": ["nginx"]
+                }, {
+                    "file": ANY, "line": ANY,
+                    "directive": "worker_processes",
+                    "args": ["auto"]
+                }, {
+                    "file": ANY, "line": ANY,
+                    "directive": "error_log",
+                    "args": ["/dev/stderr", "notice"]
+                }, {
+                    "file": ANY, "line": ANY,
+                    "directive": "events",
+                    "args": [],
+                    "block": [{
+                        "file": ANY, "line": ANY,
+                        "directive": "worker_connections",
+                        "args": ["512"]
+                    }]
+                }, {
+                    "file": ANY, "line": ANY,
+                    "directive": "http",
+                    "args": [],
+                    "block": [{
+                        "file": ANY, "line": ANY,
+                        "directive": "server",
+                        "args": [],
+                        "block": [{
+                            "file": ANY, "line": ANY,
+                            "directive": "listen",
+                            "args": ["80", "default_server"]
+                        }, {
+                            "file": ANY, "line": ANY,
+                            "directive": "server_name",
+                            "args": ["localhost"]
+                        }, {
+                            "file": ANY, "line": ANY,
+                            "directive": "location",
+                            "args": ["=", "/"],
+                            "block": [{
+                                "file": ANY, "line": ANY,
+                                "directive": "proxy_pass",
+                                "args": ["http://1.2.3.4:8080"]
+                            }]
+                        }, {
+                            "file": ANY, "line": ANY,
+                            "directive": "location",
+                            "args": ["/ctn2"],
+                            "block": [{
+                                "file": ANY, "line": ANY,
+                                "directive": "proxy_pass",
+                                "args": ["http://:9999"]
+                            }]
+                        }]
+                    }]
+                }]
+            }]
+        }
+        return expected
+
+    def test_plain(self):
+        self._setup_mock()
+        res = self.client.get("/nginx")
+        self.assertEqual(200, res.status_code)
+        self.assertIn("user nginx;", res.text)
+        self.assertIn("worker_processes auto;", res.text)
+        self.assertIn("location /ctn2", res.text)
+        self.assertIn("location = /", res.text)
+        self.assertIn("1.2.3.4:8080", res.text)
+
+    def test_json(self):
+        expected = self._setup_mock()
+        res = self.client.get("/nginx/json")
+        self.assertEqual(200, res.status_code)
+        self.assertEqual(expected, res.json())
+
+    def test_json_subpath(self):
+        self._setup_mock()
+        res = self.client.get("/nginx/json/status")
+        self.assertEqual(200, res.status_code)
+        self.assertEqual("ok", res.text)
