@@ -324,7 +324,8 @@ def middleware2apache(mdlconf: list[HttpMiddleware]) -> list[str]:
     return res
 
 
-def traefik2apache(traefik_file: TraefikConfig | str, output: io.IOBase, baseconf: str | None, server_url: str, ipaddr: bool):
+def traefik2apache(traefik_file: TraefikConfig | str, output: io.IOBase, baseconf: str | None,
+                   server_url: str, ipaddr: bool):
     """generate apache virtualhost configuration from traefik configuration"""
     if baseconf:
         apconf = Path(baseconf).read_text()
