@@ -173,7 +173,7 @@ def traefik_container_config(ctn: docker.models.containers.Container):
     return from_args, from_envs, from_conf
 
 
-def traefik_dump(client: docker.DockerClient):
+def traefik_dump(client: docker.DockerClient) -> TraefikConfig:
     """extract traefik configuration"""
     from_conf = TraefikConfig()
     from_args = TraefikConfig()
@@ -203,7 +203,7 @@ def traefik_dump(client: docker.DockerClient):
     res = from_conf.merge(from_envs)
     res = res.merge(from_args)
     res = res.merge(from_label)
-    return res.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True)
+    return res
 
 
 def get_backend(svc: HttpService, ipaddr: bool = False) -> list[str]:
@@ -220,7 +220,8 @@ def get_backend(svc: HttpService, ipaddr: bool = False) -> list[str]:
     return backend_urls
 
 
-def traefik2nginx(traefik_file: dict | str, output: io.IOBase, baseconf: str | None, server_url: str, ipaddr: bool):
+def traefik2nginx(traefik_file: TraefikConfig | str, output: io.IOBase, baseconf: str | None,
+                  server_url: str, ipaddr: bool):
     """generate nginx configuration from traefik configuration"""
     import crossplane
     import urllib.parse
@@ -243,8 +244,8 @@ http {server {listen %s default_server; server_name %s;}}
     target = find_server_block(nginx_confs, ps.hostname or "localhost")
     _log.debug("target: %s", target)
     assert target is not None
-    if isinstance(traefik_file, dict):
-        traefik_config = TraefikConfig.model_validate(traefik_file)
+    if isinstance(traefik_file, TraefikConfig):
+        traefik_config = traefik_file
     else:
         traefik_config = TraefikConfig.model_validate(yaml.safe_load(traefik_file))
     if not traefik_config.http:
@@ -323,7 +324,7 @@ def middleware2apache(mdlconf: list[HttpMiddleware]) -> list[str]:
     return res
 
 
-def traefik2apache(traefik_file: dict | str, output: io.IOBase, baseconf: str | None, server_url: str, ipaddr: bool):
+def traefik2apache(traefik_file: TraefikConfig | str, output: io.IOBase, baseconf: str | None, server_url: str, ipaddr: bool):
     """generate apache virtualhost configuration from traefik configuration"""
     if baseconf:
         apconf = Path(baseconf).read_text()
@@ -337,8 +338,8 @@ def traefik2apache(traefik_file: dict | str, output: io.IOBase, baseconf: str | 
 </VirtualHost>
 """ % (ps.port or 80, ps.hostname)
 
-    if isinstance(traefik_file, dict):
-        traefik_config = TraefikConfig.model_validate(traefik_file)
+    if isinstance(traefik_file, TraefikConfig):
+        traefik_config = traefik_file
     else:
         traefik_config = TraefikConfig.model_validate(yaml.safe_load(traefik_file))
     if not traefik_config.http:

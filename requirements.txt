@@ -5,3 +5,5 @@ crossplane
 dictknife
 toml
 pydantic
+fastapi
+jsonpointer
