@@ -20,7 +20,7 @@ jobs:
         restore-keys: ${{ runner.os }}-pip-
     - uses: wtnb75/actions/python@main
       with:
-        pipinstall: ".[ssh] --cache-dir _cache"
+        pipinstall: ".[ssh] --cache-dir _cache httpx"
     - uses: wtnb75/actions/flake8@main
     - uses: wtnb75/actions/pytest@main
     - uses: wtnb75/actions/wheel@main

@@ -64,7 +64,14 @@ class TestCompose(unittest.TestCase):
             raise result.exception
         data = yaml.safe_load(result.output)
         self.assertEqual(0, result.exit_code)
-        self.assertEqual({}, data)
+        self.assertEqual({
+            "services": {
+                "ctn1": {
+                    "image": "docker-image:latest",
+                    "labels": {"key1": "value1", "key2": "value2"}
+                }
+            }
+        }, data)
 
     @patch("docker.from_env")
     def test_compose_ignore_proj(self, dcl):

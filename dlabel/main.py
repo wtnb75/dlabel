@@ -140,16 +140,36 @@ def attrs(client: docker.DockerClient, output):
     return res
 
 
+class ComposeGen:
+    def __init__(self, **kwargs):
+        self.gen = compose(**kwargs)
+
+    def __iter__(self):
+        self.value = yield from self.gen
+        return self.value
+
+
 @cli.command(compose.__name__, help=compose.__doc__)
 @click.option("--output", type=click.Path(file_okay=False, dir_okay=True, exists=True, writable=True))
-@click.option("--all/--compose", default=False, show_default=True)
 @click.option("--volume/--no-volume", default=True, show_default=True)
-@click.option("--project", default="*", show_default=True)
+@click.option("--project")
 @verbose_option
 @docker_option
 @format_option
-def _compose(*args, **kwargs):
-    return compose(*args, **kwargs)
+def _compose(client, output, volume, project):
+    if not output:
+        volume = False
+    cgen = ComposeGen(client=client, volume=volume, project=project)
+    for path, bin in cgen:
+        if output:
+            out = Path(output) / path
+            if out.is_relative_to(output):
+                _log.debug("output %s -> %s (%s bytes)", path, out, len(bin))
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_bytes(bin)
+            else:
+                _log.debug("is not relative: pass %s -> %s (%s bytes)", path, out, len(bin))
+    return cgen.value
 
 
 @cli.command(traefik2nginx.__name__, help=traefik2nginx.__doc__)
@@ -175,7 +195,7 @@ def _traefik2apache(*args, **kwargs):
 @docker_option
 @format_option
 def _traefik_dump(*args, **kwargs):
-    return traefik_dump(*args, **kwargs)
+    return traefik_dump(*args, **kwargs).to_dict()
 
 
 @cli.command()
@@ -267,7 +287,7 @@ def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf:
         newconfig = traefik_dump(client)
         if newconfig != config:
             _log.info("change detected")
-            for d in dictknife.diff(config, newconfig):
+            for d in dictknife.diff(config.to_dict(), newconfig.to_dict()):
                 _log.info("diff: %s", d)
             _log.info("generate config")
             with open(conffile, "w") as ngc:
@@ -484,6 +504,27 @@ def diff_sbom(client: docker.DockerClient, container: docker.models.containers.C
         subprocess.check_call([collector, "scan", f"dir:{rootdir}", "-o", f"json={sbomfn}"])
         _log.info("check vuln")
         subprocess.check_call([checker, f"sbom:{sbomfn}"])
+
+
+@cli.command()
+@verbose_option
+@docker_option
+@click.option("--listen", default="0.0.0.0", show_default=True)
+@click.option("--port", type=int, default=8000, show_default=True)
+@click.option("--schema/--no-schema", default=False)
+@format_option
+def server(client: docker.DockerClient, listen, port, schema):
+    from fastapi import FastAPI
+    from .api import ComposeRoute, TraefikRoute, NginxRoute
+    import uvicorn
+    api = FastAPI()
+    api.include_router(ComposeRoute(client).router, prefix="/compose")
+    api.include_router(TraefikRoute(client).router, prefix="/traefik")
+    api.include_router(NginxRoute(client).router, prefix="/nginx")
+    if schema:
+        return api.openapi()
+    else:
+        uvicorn.run(api, host=listen, port=port, log_config=None)
 
 
 if __name__ == "__main__":

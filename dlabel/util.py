@@ -40,8 +40,8 @@ def download_files(ctn: docker.models.containers.Container, filename: str):
     for chunk in bins:
         fp.write(chunk)
     fp.seek(0)
-    with tarfile.open(fileobj=fp) as tar:
-        for member in tar.getmembers():
+    with tarfile.open(fileobj=fp, mode="r|") as tar:
+        for member in tar:
             if member.isfile():
                 _log.debug("extract %s", member.name)
                 tf = tar.extractfile(member)

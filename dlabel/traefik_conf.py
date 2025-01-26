@@ -47,6 +47,9 @@ class Model(BaseModel):
     def __str__(self) -> str:
         return self.model_dump_json(**excludes)
 
+    def to_dict(self) -> dict:
+        return self.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True)
+
 
 def csv_list(v: Any) -> list[str]:
     if isinstance(v, str):

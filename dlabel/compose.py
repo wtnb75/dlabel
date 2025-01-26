@@ -2,9 +2,11 @@ import io
 import tarfile
 import fnmatch
 import docker
+import yaml
 from typing import Any
 from pathlib import Path
 from logging import getLogger
+from .util import download_files
 _log = getLogger(__name__)
 
 
@@ -82,7 +84,7 @@ def copy_files(ctn: docker.models.containers.Container, src: str | Path, dst: st
     bio.close()
 
 
-def compose(client: docker.DockerClient, output, all, project, volume):   # noqa: C901
+def compose(client: docker.DockerClient, project, volume):   # noqa: C901
     """generate docker-compose.yml from running containers"""
     svcs = {}
     vols = {}
@@ -93,10 +95,10 @@ def compose(client: docker.DockerClient, output, all, project, volume):   # noqa
         labels: dict[str, str] = config.get("Labels", {})
         proj = labels.get("com.docker.compose.project")
         wdir = Path(labels.get("com.docker.compose.project.working_dir", "/"))
-        if not all and not proj:
-            _log.debug("skip: no project, not --all: %s", ctn.name)
+        if project and not proj:
+            _log.debug("skip: no project: %s", ctn.name)
             continue
-        if not all and proj and not fnmatch.fnmatch(proj, project):
+        if project and proj and not fnmatch.fnmatch(proj, project):
             _log.debug("skip by project (%s)", proj)
             continue
         name = labels.get("com.docker.compose.service", ctn.name)
@@ -129,9 +131,12 @@ def compose(client: docker.DockerClient, output, all, project, volume):   # noqa
                 cvols.append(f"{srcstr}:{dest}")
             elif len(v) == 3:
                 cvols.append(f"{srcstr}:{dest}:{v[2]}")
-            if output and volume and srcstr.startswith("./"):
-                copy_files(ctn, dest, Path(output) / srcstr)
-            elif output:
+            if volume and srcstr.startswith("./"):
+                for is_dir, tinfo, bin in download_files(ctn, dest):
+                    _log.debug("read from volume: src=%s, is_dir=%s, name=%s, %s bytes",
+                               srcstr, is_dir, tinfo.name, len(bin))
+                    yield Path(srcstr) / ".." / tinfo.name, bin
+            elif volume:
                 _log.info("skip copy: %s:%s -> %s", name, dest, srcstr)
         for m in hostconfig.get("Mounts", []):
             if imgvol and m.get("Target") in imgvol:
@@ -204,8 +209,5 @@ def compose(client: docker.DockerClient, output, all, project, volume):   # noqa
         res["volumes"] = vols
     if nets:
         res["networks"] = nets
-    if output:
-        with (Path(output) / "compose.yml").open("w") as ofp:
-            import yaml
-            yaml.dump(res, stream=ofp, allow_unicode=True, encoding="utf-8", sort_keys=False)
+    yield Path("compose.yml"), yaml.dump(res, allow_unicode=True, encoding="utf-8", sort_keys=False)
     return res
