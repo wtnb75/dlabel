@@ -303,61 +303,47 @@ class TestNginxRoute(unittest.TestCase):
             "status": "ok",
             "errors": [],
             "config": [{
-                "file": ANY,
                 "status": "ok",
                 "errors": [],
                 "parsed": [{
-                    "file": ANY, "line": ANY,
                     "directive": "user",
                     "args": ["nginx"]
                 }, {
-                    "file": ANY, "line": ANY,
                     "directive": "worker_processes",
                     "args": ["auto"]
                 }, {
-                    "file": ANY, "line": ANY,
                     "directive": "error_log",
                     "args": ["/dev/stderr", "notice"]
                 }, {
-                    "file": ANY, "line": ANY,
                     "directive": "events",
                     "args": [],
                     "block": [{
-                        "file": ANY, "line": ANY,
                         "directive": "worker_connections",
                         "args": ["512"]
                     }]
                 }, {
-                    "file": ANY, "line": ANY,
                     "directive": "http",
                     "args": [],
                     "block": [{
-                        "file": ANY, "line": ANY,
                         "directive": "server",
                         "args": [],
                         "block": [{
-                            "file": ANY, "line": ANY,
                             "directive": "listen",
                             "args": ["80", "default_server"]
                         }, {
-                            "file": ANY, "line": ANY,
                             "directive": "server_name",
                             "args": ["localhost"]
                         }, {
-                            "file": ANY, "line": ANY,
                             "directive": "location",
                             "args": ["=", "/"],
                             "block": [{
-                                "file": ANY, "line": ANY,
                                 "directive": "proxy_pass",
                                 "args": ["http://1.2.3.4:8080"]
                             }]
                         }, {
-                            "file": ANY, "line": ANY,
                             "directive": "location",
                             "args": ["/ctn2"],
                             "block": [{
-                                "file": ANY, "line": ANY,
                                 "directive": "proxy_pass",
                                 "args": ["http://:9999"]
                             }]
@@ -367,6 +353,15 @@ class TestNginxRoute(unittest.TestCase):
             }]
         }
         return expected
+
+    def _del_file_line(self, d: dict) -> dict:
+        d.pop("file", None)
+        d.pop("line", None)
+        if "block" in d:
+            d["block"] = [self._del_file_line(x) for x in d["block"]]
+        if "parsed" in d:
+            d["parsed"] = [self._del_file_line(x) for x in d["parsed"]]
+        return d
 
     def test_plain(self):
         self._setup_mock()
@@ -381,8 +376,10 @@ class TestNginxRoute(unittest.TestCase):
     def test_json(self):
         expected = self._setup_mock()
         res = self.client.get("/nginx/json")
+        resj = res.json()
+        resj["config"] = [self._del_file_line(x) for x in resj["config"]]
         self.assertEqual(200, res.status_code)
-        self.assertDictEqual(expected, res.json())
+        self.assertDictEqual(expected, resj)
 
     def test_json_subpath(self):
         self._setup_mock()
