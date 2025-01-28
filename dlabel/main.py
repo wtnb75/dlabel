@@ -26,7 +26,7 @@ def cli(ctx):
 
 
 def verbose_option(func):
-    @click.option("--verbose/--quiet", default=None)
+    @click.option("--verbose/--quiet", default=None, help="INFO(default)/DEBUG(verbose)/WARNING(quiet)")
     @functools.wraps(func)
     def _(verbose, **kwargs):
         from logging import basicConfig
@@ -42,7 +42,8 @@ def verbose_option(func):
 
 
 def format_option(func):
-    @click.option("--format", default="yaml", type=click.Choice(["yaml", "json", "toml"]), show_default=True)
+    @click.option("--format", default="yaml", type=click.Choice(["yaml", "json", "toml"]), show_default=True,
+                  help="output format")
     @functools.wraps(func)
     def _(format, **kwargs):
         res = func(**kwargs)
@@ -74,8 +75,8 @@ def docker_option(func):
 
 def container_option(func):
     @docker_option
-    @click.option("--name")
-    @click.option("--id")
+    @click.option("--name", help="container name")
+    @click.option("--id", help="container id")
     @functools.wraps(func)
     def _(client: docker.DockerClient, name: str, id: str, **kwargs):
         if not name and not id:
@@ -151,8 +152,8 @@ class ComposeGen:
 
 @cli.command(compose.__name__, help=compose.__doc__)
 @click.option("--output", type=click.Path(file_okay=False, dir_okay=True, exists=True, writable=True))
-@click.option("--volume/--no-volume", default=True, show_default=True)
-@click.option("--project")
+@click.option("--volume/--no-volume", default=True, show_default=True, help="copy volume content")
+@click.option("--project", help="project name of compose")
 @verbose_option
 @docker_option
 @format_option
@@ -210,7 +211,7 @@ def list_volume(client: docker.DockerClient):
 @cli.command()
 @docker_option
 @verbose_option
-@click.option("--image", default='hello-world', show_default=True)
+@click.option("--image", default='hello-world', show_default=True, help="container image name")
 @click.option("--output", type=click.File("wb"), default="-", show_default=True)
 @click.option("-z", is_flag=True, help="compress with gzip")
 @click.argument("volume")
@@ -303,12 +304,13 @@ def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf:
 @docker_option
 @webserver_option
 @click.option("--conffile", type=click.Path(), required=True)
-@click.option("--nginx", default="nginx", show_default=True)
+@click.option("--nginx", default="nginx", show_default=True, help="nginx binary filepath")
 @click.option("--oneshot/--forever", default=True, show_default=True)
-@click.option("--interval", type=int, default=10, show_default=True)
+@click.option("--interval", type=int, default=10, show_default=True, help="check interval")
 @verbose_option
 def traefik_nginx_monitor(client: docker.DockerClient, baseconf: str, conffile: str, nginx: str,
                           server_url: str, ipaddr: bool, interval: int, oneshot: bool):
+    """boot nginx with configuration from labels"""
     webserver_run(client, traefik2nginx, conffile, baseconf, server_url,
                   ipaddr, interval, oneshot,
                   [nginx, "-c", conffile, "-t"],
@@ -322,12 +324,13 @@ def traefik_nginx_monitor(client: docker.DockerClient, baseconf: str, conffile: 
 @docker_option
 @webserver_option
 @click.option("--conffile", type=click.Path(), required=True)
-@click.option("--apache", default="httpd", show_default=True)
+@click.option("--apache", default="httpd", show_default=True, help="httpd binary filepath")
 @click.option("--oneshot/--forever", default=True, show_default=True)
-@click.option("--interval", type=int, default=10, show_default=True)
+@click.option("--interval", type=int, default=10, show_default=True, help="check interval")
 @verbose_option
 def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile: str, apache: str,
                            server_url: str, ipaddr: bool, interval: int, oneshot: bool):
+    """boot apache httpd with configuration from labels"""
     webserver_run(client, traefik2apache, conffile, baseconf, server_url,
                   ipaddr, interval, oneshot,
                   [apache, "-t"],
@@ -476,9 +479,9 @@ def make_dockerfile(client: docker.DockerClient, container: docker.models.contai
 @cli.command()
 @verbose_option
 @container_option
-@click.option("--sbom", type=click.Path(file_okay=True))
-@click.option("--collector", default="syft", show_default=True)
-@click.option("--checker", default="grype", show_default=True)
+@click.option("--sbom", type=click.Path(file_okay=True), help="output filename")
+@click.option("--collector", default="syft", show_default=True, help="syft binary filepath")
+@click.option("--checker", default="grype", show_default=True, help="grype binary filepath")
 @click.option("--ignore", multiple=True)
 def diff_sbom(client: docker.DockerClient, container: docker.models.containers.Container, ignore,
               collector, sbom, checker):
@@ -511,9 +514,10 @@ def diff_sbom(client: docker.DockerClient, container: docker.models.containers.C
 @docker_option
 @click.option("--listen", default="0.0.0.0", show_default=True)
 @click.option("--port", type=int, default=8000, show_default=True)
-@click.option("--schema/--no-schema", default=False)
+@click.option("--schema/--no-schema", default=False, help="output openapi schema and exit")
 @format_option
 def server(client: docker.DockerClient, listen, port, schema):
+    """start API server"""
     from fastapi import FastAPI
     from .api import ComposeRoute, TraefikRoute, NginxRoute
     import uvicorn
