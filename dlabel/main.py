@@ -5,14 +5,12 @@ from logging import getLogger
 import sys
 import time
 import subprocess
-import fnmatch
-import io
-import tarfile
 from pathlib import Path
 from .traefik import traefik2nginx, traefik2apache, traefik_dump
 from .compose import compose
 from .version import VERSION
-from .util import download_files, special_modes, nonreg
+from .util import get_diff, get_archives
+from .dockerfile import get_dockerfile
 
 _log = getLogger(__name__)
 
@@ -340,101 +338,6 @@ def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile:
                   )
 
 
-def get_archives(container: docker.models.containers.Container, names: set[str], outpath: str, ignore: list[str],
-                 mode: str = "w:gz"):
-    if not names:
-        return
-    outarchive = tarfile.open(outpath, mode)
-    for fn in sorted(names):
-        _log.debug("extract: %s", fn)
-        for is_dir, tinfo, bin in download_files(container, fn):
-            if is_dir:
-                tinfo.name = str(Path(fn) / tinfo.name).lstrip("/")
-            else:
-                tinfo.name = fn.lstrip("/")
-            if is_match(ignore, tinfo.name):
-                _log.debug("ignore: %s", tinfo.name)
-                continue
-            _log.debug("add file: %s (%s bytes) is_dir=%s", tinfo.name, len(bin), is_dir)
-            outarchive.addfile(tinfo, io.BytesIO(bin))
-    outarchive.close()
-
-
-def is_match(patterns: list[str], target: str) -> bool:
-    for p in patterns:
-        if fnmatch.fnmatch(target, p):
-            return True
-    return False
-
-
-def is_already(prev: set[str], target: str) -> bool:
-    for p in prev:
-        if Path(p) in Path(target).parents:
-            return True
-    return False
-
-
-def do_kind0(modified: set[str], path: str, link: dict[str, str],
-             container: docker.models.containers.Container):   # modified
-    _, stats = container.get_archive(path)
-    _log.debug("stats %s: %s", path, stats)
-    special, _ = special_modes(stats["mode"])
-    if nonreg & special:
-        _log.debug("skip: %s %s", path, special)
-    elif "symlink" in special and stats["linkTarget"]:
-        link[path] = stats["linkTarget"]
-    else:
-        modified.add(path)
-
-
-def do_kind1(added: set[str], path: str, link: dict[str, str],
-             container: docker.models.containers.Container):   # added
-    if is_already(added, path):
-        _log.debug("skip(parent-exists): %s", path)
-    else:
-        _, stats = container.get_archive(path)
-        _log.debug("stats %s: %s", path, stats)
-        special, _ = special_modes(stats["mode"])
-        if (nonreg-{"dir"}) & special:
-            _log.debug("skip: %s %s", path, special)
-        elif "symlink" in special and stats["linkTarget"]:
-            link[path] = stats["linkTarget"]
-        else:
-            added.add(path)
-
-
-def do_kind2(deleted: set[str], path: str):  # deleted
-    if is_already(deleted, path):
-        _log.debug("skip(parent-exists): %s", path)
-    else:
-        deleted.add(path)
-
-
-def get_diff(container: docker.models.containers.Container, ignore: list[str]) -> \
-        tuple[set[str], set[str], set[str], dict[str, str]]:
-    deleted: set[str] = set()
-    added: set[str] = set()
-    modified: set[str] = set()
-    link: dict[str, str] = {}
-    for pathkind in container.diff():
-        path = pathkind["Path"]
-        kind = pathkind["Kind"]
-        if is_match(ignore, path):
-            _log.debug("ignore: %s", path)
-            continue
-        if kind == 2:  # deleted
-            do_kind2(deleted, path)
-        elif kind == 1:  # added
-            do_kind1(added, path, link, container)
-        elif kind == 0:  # modified
-            do_kind0(modified, path, link, container)
-    _log.debug("deleted: %s", deleted)
-    _log.debug("added: %s", added)
-    _log.debug("modified: %s", modified)
-    _log.debug("link: %s", link)
-    return deleted, added, modified, link
-
-
 @cli.command()
 @verbose_option
 @container_option
@@ -443,37 +346,16 @@ def get_diff(container: docker.models.containers.Container, ignore: list[str]) -
 @click.option("--labels/--no-labels", default=False, show_default=True)
 def make_dockerfile(client: docker.DockerClient, container: docker.models.containers.Container, output, ignore, labels):
     """make Dockerfile from running container"""
-    import shlex
-    deleted, added, modified, link = get_diff(container, ignore)
     if output:
         Path(output).mkdir(exist_ok=True)
-        ofp = (Path(output) / "Dockerfile").open("w")
-        (Path(output) / ".dockerignore").write_text("""
-*
-!added.tar.gz
-!modified.tar.gz
-""")
-        get_archives(container, added, Path(output) / "added.tar.gz", ignore)
-        get_archives(container, modified, Path(output) / "modified.tar.gz", ignore)
-    else:
-        ofp = sys.stdout
-    from_image = container.attrs.get("Config", {}).get("Image")
-    print(f"FROM {from_image}", file=ofp)
-    if deleted:
-        print("RUN rm -rf " + shlex.join(sorted(deleted)), file=ofp)
-    if added:
-        print("ADD added.tar.gz /", file=ofp)
-    if modified:
-        print("ADD modified.tar.gz /", file=ofp)
-    for k, v in sorted(link.items()):
-        print(f"RUN ln -sf {shlex.quote(v)} {shlex.quote(k)}", file=ofp)
-    if labels:
-        image_labels = container.image.labels
-        for k, v in container.labels.items():
-            if k.startswith("com.docker.compose."):
-                continue
-            if image_labels.get(k) != v:
-                print(f"LABEL {shlex.quote(k)}={shlex.quote(v)}", file=ofp)
+    dfbin: None | bytes = None
+    for name, bin in get_dockerfile(container, ignore, labels, bool(output)):
+        if bool(output):
+            (Path(output) / name).write_bytes(bin)
+        if name == "Dockerfile":
+            dfbin = bin
+    if not (bool(output)):
+        print(dfbin.decode(), end="")
 
 
 @cli.command()
@@ -499,7 +381,8 @@ def diff_sbom(client: docker.DockerClient, container: docker.models.containers.C
         else:
             sbomfn = Path(td) / "sbom.json"
         _log.info("get diffs: %s+%s file/dirs", len(added), len(modified))
-        get_archives(container, added | modified, tarfn, ignore, "w")
+        tfbin = get_archives(container, added | modified, ignore, "w")
+        tarfn.write_bytes(tfbin)
         _log.info("extract files: size=%s", tarfn.stat().st_size)
         with tarfile.open(tarfn) as tf:
             tf.extractall(rootdir, filter='data')
@@ -519,12 +402,13 @@ def diff_sbom(client: docker.DockerClient, container: docker.models.containers.C
 def server(client: docker.DockerClient, listen, port, schema):
     """start API server"""
     from fastapi import FastAPI
-    from .api import ComposeRoute, TraefikRoute, NginxRoute
+    from .api import ComposeRoute, TraefikRoute, NginxRoute, DockerfileRoute
     import uvicorn
     api = FastAPI()
     api.include_router(ComposeRoute(client).router, prefix="/compose")
     api.include_router(TraefikRoute(client).router, prefix="/traefik")
     api.include_router(NginxRoute(client).router, prefix="/nginx")
+    api.include_router(DockerfileRoute(client).router, prefix="/dockerfile")
     if schema:
         return api.openapi()
     else:

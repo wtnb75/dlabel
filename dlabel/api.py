@@ -5,12 +5,18 @@ import io
 import jsonpointer
 import crossplane
 import tempfile
+import tarfile
+import time
 import json
 from abc import abstractmethod, ABCMeta
 from typing import Any
+from logging import getLogger
 from .compose import compose
 from .traefik import traefik_dump, traefik2nginx
 from .traefik_conf import TraefikConfig
+from .dockerfile import get_dockerfile
+
+_log = getLogger(__name__)
 
 
 class CommonRoute(metaclass=ABCMeta):
@@ -60,20 +66,50 @@ class ComposeRoute(CommonRoute):
         return StreamingResponse(arc, media_type="application/x-tar")
 
 
-class DockerfileRoute(CommonRoute):
-    def getroot(self) -> dict:
+class DockerfileRoute:
+    def __init__(self, client: docker.DockerClient):
+        self.client = client
+        self.router = APIRouter()
+        kwargs = dict(response_model_exclude_none=True, response_model_exclude_unset=True)
+        self.router.add_api_route("/", self.getroot, methods=["GET"], **kwargs)
+        self.router.add_api_route("/{container:path}/Dockerfile", self.get_dockerfile, methods=["GET"], **kwargs)
+        self.router.add_api_route("/{container:path}/archive.tar", self.get_archive, methods=["GET"], **kwargs)
+
+    def getroot(self) -> list[str]:
         # list containers
-        pass
+        return [x.name for x in self.client.containers.list()]
 
-    def getsub(self, path: str, project: str | None = None) -> Any:
+    def get_dockerfile(self, container: str, ignore: list[str] = [], labels: bool = True) -> Any:
         # get dockerfile
-        pass
+        ctn = self.client.containers.get(container)
+        for _, bin in get_dockerfile(ctn, ignore, labels, do_output=False):
+            return PlainTextResponse(bin.decode())
 
-    def getarchive(self, project: str | None = None):
+    def get_archive(self, container: str, ignore: list[str] = [], labels: bool = True):
+        ctn = self.client.containers.get(container)
+
         def arc():
-            yield "hello"
+            ofp = io.BytesIO()
+            osk = ofp.tell()
+            tf = tarfile.open(mode="w", fileobj=ofp)
+            for name, bin in get_dockerfile(ctn, ignore, labels, do_output=True):
+                ti = tarfile.TarInfo(name)
+                ti.mode = 0o644
+                ti.mtime = time.time()
+                ti.size = len(bin)
+                tf.addfile(ti, io.BytesIO(bin))
+                _log.info("addfile %s, size=%s", name, len(bin))
+                if osk != ofp.tell():
+                    ofp.seek(osk)
+                    yield ofp.read()
+                    osk = ofp.tell()
+            tf.close()
+            if osk != ofp.tell():
+                ofp.seek(osk)
+                yield ofp.read()
+            _log.info("finished: %s", container)
 
-        return StreamingResponse(arc, media_type="application/x-tar")
+        return StreamingResponse(arc(), media_type="application/x-tar")
 
 
 class TraefikRoute(CommonRoute):
