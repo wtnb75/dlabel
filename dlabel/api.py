@@ -72,8 +72,12 @@ class DockerfileRoute:
         self.router = APIRouter()
         kwargs = dict(response_model_exclude_none=True, response_model_exclude_unset=True)
         self.router.add_api_route("/", self.getroot, methods=["GET"], **kwargs)
-        self.router.add_api_route("/{container:path}/Dockerfile", self.get_dockerfile, methods=["GET"], **kwargs)
-        self.router.add_api_route("/{container:path}/archive.tar", self.get_archive, methods=["GET"], **kwargs)
+        self.router.add_api_route("/{container:path}/Dockerfile", self.get_dockerfile, methods=["GET"],
+                                  response_class=PlainTextResponse, **kwargs)
+        self.router.add_api_route(
+            "/{container:path}/archive.tar", self.get_archive, methods=["GET"],
+            response_class=StreamingResponse,
+            responses={200: {"content": {"application/x-tar": {}}, }}, **kwargs)
 
     def getroot(self) -> list[str]:
         # list containers
@@ -91,7 +95,7 @@ class DockerfileRoute:
         def arc():
             ofp = io.BytesIO()
             osk = ofp.tell()
-            tf = tarfile.open(mode="w", fileobj=ofp)
+            tf = tarfile.open(mode="w", fileobj=ofp, format=tarfile.GNU_FORMAT)
             for name, bin in get_dockerfile(ctn, ignore, labels, do_output=True):
                 ti = tarfile.TarInfo(name)
                 ti.mode = 0o644
@@ -126,7 +130,8 @@ class NginxRoute(CommonRoute):
     def __init__(self, client: docker.DockerClient):
         self.client = client
         self.router = APIRouter()
-        self.router.add_api_route("/", self.getroot, methods=["GET"])
+        self.router.add_api_route("/", self.getroot, methods=["GET"],
+                                  response_class=PlainTextResponse)
         self.router.add_api_route("/json", self.getplane, methods=["GET"])
         self.router.add_api_route("/json/{path:path}", self.getplanesub, methods=["GET"])
 
