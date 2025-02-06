@@ -5,7 +5,7 @@ from logging import getLogger
 _log = getLogger(__name__)
 
 
-def get_dockerfile(container: docker.models.containers.Container,
+def get_dockerfile(container: docker.models.containers.Container,  # noqa: C901
                    ignore, labels, do_output: bool):
     """make Dockerfile from running container"""
     import shlex
