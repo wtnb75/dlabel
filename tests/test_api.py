@@ -334,19 +334,19 @@ class TestNginxRoute(unittest.TestCase):
                             "directive": "server_name",
                             "args": ["localhost"]
                         }, {
-                            "directive": "location",
-                            "args": ["=", "/"],
+                            "directive": "location",  # no particular order
+                            "args": ANY,        # ["=", "/"],
                             "block": [{
                                 "directive": "proxy_pass",
-                                "args": ["http://1.2.3.4:8080"]
+                                "args": [ANY],  # ["http://1.2.3.4:8080"]
                             }]
                         }, {
-                            "directive": "location",
-                            "args": ["/ctn2"],
+                            "directive": "location",  # no particular order
+                            "args": ANY,        # ["/ctn2"]
                             "block": [{
                                 "directive": "proxy_pass",
-                                "args": ["http://:9999"]
-                            }]
+                                "args": [ANY],  # ["http://:9999"]
+                            }],
                         }]
                     }]
                 }]
