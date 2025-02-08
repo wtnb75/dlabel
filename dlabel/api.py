@@ -89,7 +89,7 @@ class DockerfileRoute:
         for _, bin in get_dockerfile(ctn, ignore, labels, do_output=False):
             return PlainTextResponse(bin.decode())
 
-    def get_archive(self, container: str, ignore: list[str] = [], labels: bool = True):
+    def get_archive(self, container: str, ignore: list[str] = [], labels: bool = False):
         ctn = self.client.containers.get(container)
 
         def arc():
