@@ -346,16 +346,27 @@ def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile:
 @click.option("--labels/--no-labels", default=False, show_default=True)
 def make_dockerfile(client: docker.DockerClient, container: docker.models.containers.Container, output, ignore, labels):
     """make Dockerfile from running container"""
-    if output:
+    import tarfile
+    import io
+    tf: tarfile.TarFile | None = None
+    if output == "-":
+        _log.debug("stream output")
+        tf = tarfile.open(mode="w|", fileobj=sys.stdout.buffer, format=tarfile.GNU_FORMAT)
+    elif output:
         Path(output).mkdir(exist_ok=True)
-    dfbin: None | bytes = None
     for name, bin in get_dockerfile(container, ignore, labels, bool(output)):
-        if bool(output):
+        if tf:
+            ti = tarfile.TarInfo(name)
+            ti.mode = 0o644
+            ti.mtime = time.time()
+            ti.size = len(bin)
+            tf.addfile(ti, io.BytesIO(bin))
+        elif bool(output):
             (Path(output) / name).write_bytes(bin)
-        if name == "Dockerfile":
-            dfbin = bin
-    if not (bool(output)):
-        print(dfbin.decode(), end="")
+        elif name == "Dockerfile":
+            sys.stdout.buffer.write(bin)
+    if tf:
+        tf.close()
 
 
 @cli.command()
