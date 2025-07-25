@@ -9,7 +9,7 @@ from pathlib import Path
 from .traefik import traefik2nginx, traefik2apache, traefik_dump
 from .compose import compose
 from .version import VERSION
-from .util import get_diff, get_archives
+from .util import get_diff, get_archives, get_volumes
 from .dockerfile import get_dockerfile
 
 _log = getLogger(__name__)
@@ -45,15 +45,18 @@ def format_option(func):
     @functools.wraps(func)
     def _(format, **kwargs):
         res = func(**kwargs)
-        if format == "json":
-            import json
-            json.dump(res, indent=2, fp=sys.stdout, ensure_ascii=False)
-        elif format == "yaml":
-            import yaml
-            yaml.dump(res, stream=sys.stdout, allow_unicode=True, encoding="utf-8", sort_keys=False)
-        elif format == "toml":
-            import toml
-            toml.dump(res, sys.stdout)
+        if res is None:
+            _log.debug("no output(None): format=%s", format)
+        else:
+            if format == "json":
+                import json
+                json.dump(res, indent=2, fp=sys.stdout, ensure_ascii=False)
+            elif format == "yaml":
+                import yaml
+                yaml.dump(res, stream=sys.stdout, allow_unicode=True, encoding="utf-8", sort_keys=False)
+            elif format == "toml":
+                import toml
+                toml.dump(res, sys.stdout)
         return res
     return _
 
@@ -349,11 +352,15 @@ def make_dockerfile(client: docker.DockerClient, container: docker.models.contai
     import tarfile
     import io
     tf: tarfile.TarFile | None = None
-    if output == "-":
-        _log.debug("stream output")
-        tf = tarfile.open(mode="w|", fileobj=sys.stdout.buffer, format=tarfile.GNU_FORMAT)
-    elif output:
-        Path(output).mkdir(exist_ok=True)
+    if bool(output):
+        if output == "-":
+            _log.debug("stream output")
+            tf = tarfile.open(mode="w|", fileobj=sys.stdout.buffer, format=tarfile.GNU_FORMAT)
+        elif not Path(output).is_dir():
+            _log.debug("file output: %s", output)
+            tf = tarfile.open(name=output, mode="w", format=tarfile.GNU_FORMAT)
+        else:
+            _log.debug("directory output: %s", output)
     for name, bin in get_dockerfile(container, ignore, labels, bool(output)):
         if tf:
             ti = tarfile.TarInfo(name)
@@ -375,15 +382,19 @@ def make_dockerfile(client: docker.DockerClient, container: docker.models.contai
 @click.option("--sbom", type=click.Path(file_okay=True), help="output filename")
 @click.option("--collector", default="syft", show_default=True, help="syft binary filepath")
 @click.option("--checker", default="grype", show_default=True, help="grype binary filepath")
+@click.option("--ignore-volume/--include-volume", default=True, show_default=True)
 @click.option("--ignore", multiple=True)
 def diff_sbom(client: docker.DockerClient, container: docker.models.containers.Container, ignore,
-              collector, sbom, checker):
+              collector, sbom, checker, ignore_volume):
     """make SBOM and check Vulnerability of updated files in container"""
     import tempfile
     import tarfile
     import subprocess
     _log.info("get metadata: %s", container.name)
-    deleted, added, modified, link = get_diff(container, ignore)
+    ignores = set(ignore)
+    if ignore_volume:
+        ignores.update(get_volumes(container))
+    deleted, added, modified, link = get_diff(container, ignores)
     with tempfile.TemporaryDirectory() as td:
         tarfn = Path(td) / "files.tar"
         rootdir = Path(td)/"root"
@@ -392,7 +403,7 @@ def diff_sbom(client: docker.DockerClient, container: docker.models.containers.C
         else:
             sbomfn = Path(td) / "sbom.json"
         _log.info("get diffs: %s+%s file/dirs", len(added), len(modified))
-        tfbin = get_archives(container, added | modified, ignore, "w")
+        tfbin = get_archives(container, added | modified, ignores, "w")
         tarfn.write_bytes(tfbin)
         _log.info("extract files: size=%s", tarfn.stat().st_size)
         with tarfile.open(tarfn) as tf:
@@ -401,6 +412,25 @@ def diff_sbom(client: docker.DockerClient, container: docker.models.containers.C
         subprocess.check_call([collector, "scan", f"dir:{rootdir}", "-o", f"json={sbomfn}"])
         _log.info("check vuln")
         subprocess.check_call([checker, f"sbom:{sbomfn}"])
+
+@cli.command()
+@verbose_option
+@container_option
+@click.option("--ignore-volume/--include-volume", default=True, show_default=True)
+@click.option("--ignore", multiple=True)
+@click.option("--gzip/--raw", default=False, show_default=True)
+def tar_diff(client: docker.DockerClient, container: docker.models.containers.Container, ignore, ignore_volume, gzip):
+    """make SBOM and check Vulnerability of updated files in container"""
+    _log.info("get metadata: %s", container.name)
+    ignores = set(ignore)
+    if ignore_volume:
+        ignores.update(get_volumes(container))
+    _log.debug("ignore path: %s", ignores)
+    deleted, added, modified, link = get_diff(container, ignores)
+    mode = "w:gz" if gzip else "w"
+    _log.info("get diffs: %s+%s file/dirs", len(added), len(modified))
+    tfbin = get_archives(container, added | modified, ignores, mode)
+    sys.stdout.buffer.write(tfbin)
 
 
 @cli.command()

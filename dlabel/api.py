@@ -83,7 +83,7 @@ class DockerfileRoute:
         # list containers
         return [x.name for x in self.client.containers.list()]
 
-    def get_dockerfile(self, container: str, ignore: list[str] = [], labels: bool = True) -> Any:
+    def get_dockerfile(self, container: str, ignore: list[str] = [], labels: bool = False) -> Any:
         # get dockerfile
         ctn = self.client.containers.get(container)
         for _, bin in get_dockerfile(ctn, ignore, labels, do_output=False):

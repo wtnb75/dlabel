@@ -2,6 +2,7 @@ import docker
 import tarfile
 import fnmatch
 import io
+from typing import Collection
 from pathlib import Path
 from logging import getLogger
 
@@ -51,7 +52,7 @@ def download_files(ctn: docker.models.containers.Container, filename: str):
                     yield is_dir, member, tf.read()
 
 
-def get_archives(container: docker.models.containers.Container, names: set[str], ignore: list[str],
+def get_archives(container: docker.models.containers.Container, names: set[str], ignore: Collection[str],
                  mode: str = "w:gz"):
     if not names:
         return
@@ -73,7 +74,7 @@ def get_archives(container: docker.models.containers.Container, names: set[str],
     return ofp.getvalue()
 
 
-def is_match(patterns: list[str], target: str) -> bool:
+def is_match(patterns: Collection[str], target: str) -> bool:
     for p in patterns:
         if fnmatch.fnmatch(target, p):
             return True
@@ -122,8 +123,10 @@ def do_kind2(deleted: set[str], path: str):  # deleted
     else:
         deleted.add(path)
 
+def get_volumes(container: docker.models.containers.Container) -> set[str]:
+    return {x['Destination'] for x in container.attrs['Mounts']}
 
-def get_diff(container: docker.models.containers.Container, ignore: list[str]) -> \
+def get_diff(container: docker.models.containers.Container, ignore: Collection[str]) -> \
         tuple[set[str], set[str], set[str], dict[str, str]]:
     deleted: set[str] = set()
     added: set[str] = set()
