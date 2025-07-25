@@ -413,6 +413,7 @@ def diff_sbom(client: docker.DockerClient, container: docker.models.containers.C
         _log.info("check vuln")
         subprocess.check_call([checker, f"sbom:{sbomfn}"])
 
+
 @cli.command()
 @verbose_option
 @container_option

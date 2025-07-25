@@ -123,8 +123,10 @@ def do_kind2(deleted: set[str], path: str):  # deleted
     else:
         deleted.add(path)
 
+
 def get_volumes(container: docker.models.containers.Container) -> set[str]:
     return {x['Destination'] for x in container.attrs['Mounts']}
+
 
 def get_diff(container: docker.models.containers.Container, ignore: Collection[str]) -> \
         tuple[set[str], set[str], set[str], dict[str, str]]:
