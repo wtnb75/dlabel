@@ -1,5 +1,5 @@
 services:
-  traefik:
+  traefik:  # http://traefik/
     image: traefik:v2
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -7,7 +7,7 @@ services:
     - "--providers.docker=true"
     - "--providers.docker.exposedbydefault=false"
     - "--entrypoints.web.address=:80"
-  nginx:
+  nginx:    # http://nginx/
     image: ghcr.io/wtnb75/dlabel:latest
     build: .
     volumes:
