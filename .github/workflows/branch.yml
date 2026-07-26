@@ -13,28 +13,28 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@master
-    - uses: actions/cache@v4
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: _cache
         key: ${{ runner.os }}-pip-${{ github.sha }}
         restore-keys: ${{ runner.os }}-pip-
-    - uses: wtnb75/actions/python@main
+    - uses: wtnb75/actions/python@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
       with:
         pipinstall: ".[ssh] --cache-dir _cache httpx"
-    - uses: wtnb75/actions/flake8@main
-    - uses: wtnb75/actions/pytest@main
-    - uses: wtnb75/actions/wheel@main
+    - uses: wtnb75/actions/flake8@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
+    - uses: wtnb75/actions/pytest@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
+    - uses: wtnb75/actions/wheel@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
     - id: pdoc
-      uses: wtnb75/actions/pdoc@main
+      uses: wtnb75/actions/pdoc@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
       with:
         output-dir: docs
         module: dlabel
-    - uses: wtnb75/actions/merge-pages@main
+    - uses: wtnb75/actions/merge-pages@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
       with:
         dirs: "cover docs"
         #pydist: dist
-    - uses: wtnb75/actions/docker@main
+    - uses: wtnb75/actions/docker@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
       with:
         push: 'true'
         context: .
