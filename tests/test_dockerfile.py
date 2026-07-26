@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from click.testing import CliRunner
 
 from dlabel.main import cli
@@ -75,7 +76,9 @@ class TestDockerfile(unittest.TestCase):
         }
         ctn1.get_archive.return_value = ([], {"mode": 0o644})
         dcl.return_value.containers.get.return_value = ctn1
-        result = CliRunner().invoke(cli, ["make-dockerfile", "--id", "id123", "--labels"])
+        result = CliRunner().invoke(
+            cli, ["make-dockerfile", "--id", "id123", "--labels"]
+        )
         if result.exception:
             raise result.exception
         self.assertEqual(0, result.exit_code)

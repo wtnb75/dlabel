@@ -1,9 +1,0 @@
-docker
-click
-pyyaml
-crossplane
-dictknife
-toml
-pydantic
-fastapi
-jsonpointer
