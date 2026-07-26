@@ -14,31 +14,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: _cache
-        key: ${{ runner.os }}-pip-${{ github.sha }}
-        restore-keys: ${{ runner.os }}-pip-
     - name: versioning
       run: "echo \"VERSION = '${GITHUB_REF##*/v}'\" > dlabel/version.py"
-    - uses: wtnb75/actions/python@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
+    - uses: wtnb75/actions/python@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
       with:
-        pipinstall: ".[ssh] --cache-dir _cache httpx"
-    - uses: wtnb75/actions/flake8@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
-    - uses: wtnb75/actions/pytest@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
+        extra-args: "--extra ssh"
+    - uses: wtnb75/actions/ruff@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
+    - uses: wtnb75/actions/pytest@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
     - id: wheel
-      uses: wtnb75/actions/wheel@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
+      uses: wtnb75/actions/wheel@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
     - id: pdoc
-      uses: wtnb75/actions/pdoc@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
+      uses: wtnb75/actions/pdoc@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
       with:
         output-dir: docs
         module: dlabel
-    - uses: wtnb75/actions/pypi-upload@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
+        other-options: --docformat google
+    - uses: wtnb75/actions/pypi-upload@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
       with:
         username: ${{ secrets.TWINE_USERNAME }}
         password: ${{ secrets.TWINE_PASSWORD }}
         file: dist/${{ steps.wheel.outputs.filename }}
-    - uses: wtnb75/actions/docker@c1711251ea69e3e6d68db7a9fa019d79b497f70c # v1.0.3
+    - uses: wtnb75/actions/docker@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
       with:
         push: 'true'
         context: .

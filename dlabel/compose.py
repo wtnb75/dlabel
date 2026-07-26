@@ -1,12 +1,15 @@
+import fnmatch
 import io
 import tarfile
-import fnmatch
+from logging import getLogger
+from pathlib import Path
+from typing import Any
+
 import docker
 import yaml
-from typing import Any
-from pathlib import Path
-from logging import getLogger
+
 from .util import download_files
+
 _log = getLogger(__name__)
 
 
@@ -33,12 +36,14 @@ def portmap2compose(pmap: dict) -> list[str | dict]:
                 res.append(f"{hostport}:{ctport}")
         else:
             target, protocol = k.split("/", 1)
-            res.append({
-                "target": int(target),
-                "published": int(v[0].get("HostPort")),
-                "protocol": protocol,
-                "mode": "host",
-            })
+            res.append(
+                {
+                    "target": int(target),
+                    "published": int(v[0].get("HostPort")),
+                    "protocol": protocol,
+                    "mode": "host",
+                }
+            )
     return res
 
 
@@ -49,19 +54,24 @@ def convdict(convmap: dict[str, str], fromdict: dict[str, Any], todict: dict[str
 
 
 def convdict_differ(
-        convmap: dict[str, str], dict_img: dict[str, Any], dict_ctn: dict[str, Any], todict: dict[str, Any]):
+    convmap: dict[str, str],
+    dict_img: dict[str, Any],
+    dict_ctn: dict[str, Any],
+    todict: dict[str, Any],
+):
     for k, v in convmap.items():
         if k in dict_ctn and dict_img.get(k) != dict_ctn.get(k):
             todict[v] = dict_ctn[k]
 
 
-def copy_files(ctn: docker.models.containers.Container, src: str | Path, dst: str | Path):
+def copy_files(
+    ctn: docker.models.containers.Container, src: str | Path, dst: str | Path
+):
     def tfilter(member, path):
         res = tarfile.data_filter(member, path)
-        if res:
-            if '/' in res.name:
-                _, res.name = res.name.split('/', 1)
-                return res
+        if res and "/" in res.name:
+            _, res.name = res.name.split("/", 1)
+            return res
         return None
 
     _log.info("copy %s:%s -> %s", ctn.name, src, dst)
@@ -76,7 +86,7 @@ def copy_files(ctn: docker.models.containers.Container, src: str | Path, dst: st
     members = tf.getmembers()
     if len(members) == 1 and members[0].isreg():
         _log.info("single file: %s", members[0])
-        tf.extractall(odir.parent, filter='data')
+        tf.extractall(odir.parent, filter="data")
     else:
         odir.mkdir(exist_ok=True, parents=True)
         tf.extractall(odir, filter=tfilter)
@@ -84,7 +94,7 @@ def copy_files(ctn: docker.models.containers.Container, src: str | Path, dst: st
     bio.close()
 
 
-def compose(client: docker.DockerClient, project, volume):   # noqa: C901
+def compose(client: docker.DockerClient, project, volume):
     """generate docker-compose.yml from running containers"""
     svcs = {}
     vols = {}
@@ -109,7 +119,9 @@ def compose(client: docker.DockerClient, project, volume):   # noqa: C901
         for k, v in imglabel.items():
             if labels.get(k) == v:
                 labels.pop(k)
-        labels = {k: v for k, v in labels.items() if not k.startswith("com.docker.compose.")}
+        labels = {
+            k: v for k, v in labels.items() if not k.startswith("com.docker.compose.")
+        }
         envs = envlist2map(config.get("Env", []))
         imgenv = envlist2map(imgconfig.get("Env", []))
         for k, v in imgenv.items():
@@ -117,7 +129,7 @@ def compose(client: docker.DockerClient, project, volume):   # noqa: C901
                 envs.pop(k)
         imgvol = imgconfig.get("Volumes", {})
         cvols = []
-        for i in (hostconfig.get("Binds") or []):
+        for i in hostconfig.get("Binds") or []:
             v = i.split(":", 2)
             if imgvol and v[1] in imgvol:
                 continue
@@ -133,8 +145,13 @@ def compose(client: docker.DockerClient, project, volume):   # noqa: C901
                 cvols.append(f"{srcstr}:{dest}:{v[2]}")
             if volume and srcstr.startswith("./"):
                 for is_dir, tinfo, bin in download_files(ctn, dest):
-                    _log.debug("read from volume: src=%s, is_dir=%s, name=%s, %s bytes",
-                               srcstr, is_dir, tinfo.name, len(bin))
+                    _log.debug(
+                        "read from volume: src=%s, is_dir=%s, name=%s, %s bytes",
+                        srcstr,
+                        is_dir,
+                        tinfo.name,
+                        len(bin),
+                    )
                     yield Path(srcstr) / ".." / tinfo.name, bin
             elif volume:
                 _log.info("skip copy: %s:%s -> %s", name, dest, srcstr)
@@ -143,7 +160,7 @@ def compose(client: docker.DockerClient, project, volume):   # noqa: C901
                 continue
             volname = m.get("Source")
             if proj and volname.startswith(proj + "_"):
-                volname = volname[len(proj) + 1:]
+                volname = volname[len(proj) + 1 :]
             if m.get("Type") == "volume":
                 vols[volname] = m.get("VolumeOptions", {})
             if m.get("Target"):
@@ -209,5 +226,8 @@ def compose(client: docker.DockerClient, project, volume):   # noqa: C901
         res["volumes"] = vols
     if nets:
         res["networks"] = nets
-    yield Path("compose.yml"), yaml.dump(res, allow_unicode=True, encoding="utf-8", sort_keys=False)
+    yield (
+        Path("compose.yml"),
+        yaml.dump(res, allow_unicode=True, encoding="utf-8", sort_keys=False),
+    )
     return res

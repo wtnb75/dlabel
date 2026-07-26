@@ -1,16 +1,18 @@
 import functools
-import docker
-import click
-from logging import getLogger
+import subprocess
 import sys
 import time
-import subprocess
+from logging import getLogger
 from pathlib import Path
-from .traefik import traefik2nginx, traefik2apache, traefik_dump
+
+import click
+import docker
+
 from .compose import compose
-from .version import VERSION
-from .util import get_diff, get_archives, get_volumes
 from .dockerfile import get_dockerfile
+from .traefik import traefik2apache, traefik2nginx, traefik_dump
+from .util import get_archives, get_diff, get_volumes
+from .version import VERSION
 
 _log = getLogger(__name__)
 
@@ -24,10 +26,15 @@ def cli(ctx):
 
 
 def verbose_option(func):
-    @click.option("--verbose/--quiet", default=None, help="INFO(default)/DEBUG(verbose)/WARNING(quiet)")
+    @click.option(
+        "--verbose/--quiet",
+        default=None,
+        help="INFO(default)/DEBUG(verbose)/WARNING(quiet)",
+    )
     @functools.wraps(func)
     def _(verbose, **kwargs):
         from logging import basicConfig
+
         fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
         if verbose is None:
             basicConfig(level="INFO", format=fmt)
@@ -36,12 +43,18 @@ def verbose_option(func):
         else:
             basicConfig(level="DEBUG", format=fmt)
         return func(**kwargs)
+
     return _
 
 
 def format_option(func):
-    @click.option("--format", default="yaml", type=click.Choice(["yaml", "json", "toml"]), show_default=True,
-                  help="output format")
+    @click.option(
+        "--format",
+        default="yaml",
+        type=click.Choice(["yaml", "json", "toml"]),
+        show_default=True,
+        help="output format",
+    )
     @functools.wraps(func)
     def _(format, **kwargs):
         res = func(**kwargs)
@@ -50,19 +63,35 @@ def format_option(func):
         else:
             if format == "json":
                 import json
+
                 json.dump(res, indent=2, fp=sys.stdout, ensure_ascii=False)
             elif format == "yaml":
                 import yaml
-                yaml.dump(res, stream=sys.stdout, allow_unicode=True, encoding="utf-8", sort_keys=False)
+
+                yaml.dump(
+                    res,
+                    stream=sys.stdout,
+                    allow_unicode=True,
+                    encoding="utf-8",
+                    sort_keys=False,
+                )
             elif format == "toml":
                 import toml
+
                 toml.dump(res, sys.stdout)
         return res
+
     return _
 
 
 def docker_option(func):
-    @click.option("-H", "--host", envvar="DOCKER_HOST", help="Daemon socket(s) to connect to", show_envvar=True)
+    @click.option(
+        "-H",
+        "--host",
+        envvar="DOCKER_HOST",
+        help="Daemon socket(s) to connect to",
+        show_envvar=True,
+    )
     @functools.wraps(func)
     def _(host, **kwargs):
         if not host:
@@ -90,7 +119,9 @@ def container_option(func):
         elif name:
             ctnlist = client.containers.list(filters={"name": name})
             if len(ctnlist) != 1:
-                raise FileNotFoundError(f"container named {name} not found({len(ctnlist)})")
+                raise FileNotFoundError(
+                    f"container named {name} not found({len(ctnlist)})"
+                )
             ctn = ctnlist[0]
         return func(client=client, container=ctn, **kwargs)
 
@@ -98,13 +129,18 @@ def container_option(func):
 
 
 def webserver_option(func):
-    @click.option("--baseconf", type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
-                  default=None, show_default=True)
+    @click.option(
+        "--baseconf",
+        type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
+        default=None,
+        show_default=True,
+    )
     @click.option("--server-url", default="http://localhost", show_default=True)
     @click.option("--ipaddr/--hostname", default=False, show_default=True)
     @functools.wraps(func)
     def _(**kwargs):
         return func(**kwargs)
+
     return _
 
 
@@ -118,11 +154,15 @@ def labels(client: docker.DockerClient, output):
     res: list[dict] = []
     for ctn in client.containers.list():
         image_labels = ctn.image.labels
-        res.append({
-            "name": ctn.name,
-            "labels": {k: v for k, v in ctn.labels.items() if image_labels.get(k) != v},
-            "image_labels": image_labels,
-        })
+        res.append(
+            {
+                "name": ctn.name,
+                "labels": {
+                    k: v for k, v in ctn.labels.items() if image_labels.get(k) != v
+                },
+                "image_labels": image_labels,
+            }
+        )
     return res
 
 
@@ -135,10 +175,7 @@ def attrs(client: docker.DockerClient, output):
     """show name and attributes of containers"""
     res: list[dict] = []
     for ctn in client.containers.list():
-        res.append({
-            "name": ctn.name,
-            "attrs": ctn.attrs
-        })
+        res.append({"name": ctn.name, "attrs": ctn.attrs})
     return res
 
 
@@ -152,8 +189,13 @@ class ComposeGen:
 
 
 @cli.command(compose.__name__, help=compose.__doc__)
-@click.option("--output", type=click.Path(file_okay=False, dir_okay=True, exists=True, writable=True))
-@click.option("--volume/--no-volume", default=True, show_default=True, help="copy volume content")
+@click.option(
+    "--output",
+    type=click.Path(file_okay=False, dir_okay=True, exists=True, writable=True),
+)
+@click.option(
+    "--volume/--no-volume", default=True, show_default=True, help="copy volume content"
+)
 @click.option("--project", help="project name of compose")
 @verbose_option
 @docker_option
@@ -170,7 +212,9 @@ def _compose(client, output, volume, project):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 out.write_bytes(bin)
             else:
-                _log.debug("is not relative: pass %s -> %s (%s bytes)", path, out, len(bin))
+                _log.debug(
+                    "is not relative: pass %s -> %s (%s bytes)", path, out, len(bin)
+                )
     return cgen.value
 
 
@@ -212,7 +256,9 @@ def list_volume(client: docker.DockerClient):
 @cli.command()
 @docker_option
 @verbose_option
-@click.option("--image", default='hello-world', show_default=True, help="container image name")
+@click.option(
+    "--image", default="hello-world", show_default=True, help="container image name"
+)
 @click.option("--output", type=click.File("wb"), default="-", show_default=True)
 @click.option("-z", is_flag=True, help="compress with gzip")
 @click.argument("volume")
@@ -231,7 +277,12 @@ def tar_volume(client: docker.DockerClient, volume, image, output, z):
 
     mnt = docker.types.Mount(target=mount, source=vol.id, read_only=True)
     cl = client.containers.create(img, mounts=[mnt])
-    _log.debug("Container created with image %s and volume %s mounted at %s", image, volume, mount)
+    _log.debug(
+        "Container created with image %s and volume %s mounted at %s",
+        image,
+        volume,
+        mount,
+    )
 
     try:
         bin, _ = cl.get_archive(mount, encode_stream=z)
@@ -252,7 +303,9 @@ def tar_volume(client: docker.DockerClient, volume, image, output, z):
 def traefik_load(input, strict):
     """load traefik configuration"""
     import yaml
+
     from .traefik_conf import TraefikConfig
+
     res = TraefikConfig.model_validate(yaml.safe_load(input), strict=strict)
     return res.model_dump(exclude_none=True, exclude_defaults=True, exclude_unset=True)
 
@@ -260,14 +313,29 @@ def traefik_load(input, strict):
 def srun(title: str, args: list[str], capture_output=True):
     _log.info("run %s: %s", title, args)
     cmdresult = subprocess.run(args, capture_output=capture_output, check=True)
-    _log.info("result %s: stdout=%s, stderr=%s", title, cmdresult.stdout, cmdresult.stderr)
+    _log.info(
+        "result %s: stdout=%s, stderr=%s", title, cmdresult.stdout, cmdresult.stderr
+    )
 
 
-def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf: str | None,
-                  server_url: str, ipaddr: bool, interval: int, oneshot: bool,
-                  test_cmd: list[str], boot_cmd: list[str], stop_cmd: list[str], reload_cmd: list[str]):
-    import dictknife
+def webserver_run(
+    client: docker.DockerClient,
+    conv_fn,
+    conffile: str,
+    baseconf: str | None,
+    server_url: str,
+    ipaddr: bool,
+    interval: int,
+    oneshot: bool,
+    test_cmd: list[str],
+    boot_cmd: list[str],
+    stop_cmd: list[str],
+    reload_cmd: list[str],
+):
     import atexit
+
+    import dictknife
+
     config = traefik_dump(client)
     with open(conffile, "w") as ngc:
         conv_fn(config, ngc, baseconf, server_url, ipaddr)
@@ -277,6 +345,7 @@ def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf:
     srun("boot", boot_cmd, capture_output=False)
 
     if not oneshot:
+
         @atexit.register
         def _():
             srun("exit", stop_cmd)
@@ -305,40 +374,78 @@ def webserver_run(client: docker.DockerClient, conv_fn, conffile: str, baseconf:
 @docker_option
 @webserver_option
 @click.option("--conffile", type=click.Path(), required=True)
-@click.option("--nginx", default="nginx", show_default=True, help="nginx binary filepath")
+@click.option(
+    "--nginx", default="nginx", show_default=True, help="nginx binary filepath"
+)
 @click.option("--oneshot/--forever", default=True, show_default=True)
-@click.option("--interval", type=int, default=10, show_default=True, help="check interval")
+@click.option(
+    "--interval", type=int, default=10, show_default=True, help="check interval"
+)
 @verbose_option
-def traefik_nginx_monitor(client: docker.DockerClient, baseconf: str, conffile: str, nginx: str,
-                          server_url: str, ipaddr: bool, interval: int, oneshot: bool):
+def traefik_nginx_monitor(
+    client: docker.DockerClient,
+    baseconf: str,
+    conffile: str,
+    nginx: str,
+    server_url: str,
+    ipaddr: bool,
+    interval: int,
+    oneshot: bool,
+):
     """boot nginx with configuration from labels"""
-    webserver_run(client, traefik2nginx, conffile, baseconf, server_url,
-                  ipaddr, interval, oneshot,
-                  [nginx, "-c", conffile, "-t"],
-                  [nginx, "-c", conffile],
-                  [nginx, "-s", "quit"],
-                  [nginx, "-s", "reload"]
-                  )
+    webserver_run(
+        client,
+        traefik2nginx,
+        conffile,
+        baseconf,
+        server_url,
+        ipaddr,
+        interval,
+        oneshot,
+        [nginx, "-c", conffile, "-t"],
+        [nginx, "-c", conffile],
+        [nginx, "-s", "quit"],
+        [nginx, "-s", "reload"],
+    )
 
 
 @cli.command()
 @docker_option
 @webserver_option
 @click.option("--conffile", type=click.Path(), required=True)
-@click.option("--apache", default="httpd", show_default=True, help="httpd binary filepath")
+@click.option(
+    "--apache", default="httpd", show_default=True, help="httpd binary filepath"
+)
 @click.option("--oneshot/--forever", default=True, show_default=True)
-@click.option("--interval", type=int, default=10, show_default=True, help="check interval")
+@click.option(
+    "--interval", type=int, default=10, show_default=True, help="check interval"
+)
 @verbose_option
-def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile: str, apache: str,
-                           server_url: str, ipaddr: bool, interval: int, oneshot: bool):
+def traefik_apache_monitor(
+    client: docker.DockerClient,
+    baseconf: str,
+    conffile: str,
+    apache: str,
+    server_url: str,
+    ipaddr: bool,
+    interval: int,
+    oneshot: bool,
+):
     """boot apache httpd with configuration from labels"""
-    webserver_run(client, traefik2apache, conffile, baseconf, server_url,
-                  ipaddr, interval, oneshot,
-                  [apache, "-t"],
-                  [apache],
-                  [apache, "-k", "graceful-stop"],
-                  [apache, "-k", "graceful"]
-                  )
+    webserver_run(
+        client,
+        traefik2apache,
+        conffile,
+        baseconf,
+        server_url,
+        ipaddr,
+        interval,
+        oneshot,
+        [apache, "-t"],
+        [apache],
+        [apache, "-k", "graceful-stop"],
+        [apache, "-k", "graceful"],
+    )
 
 
 @cli.command()
@@ -347,57 +454,82 @@ def traefik_apache_monitor(client: docker.DockerClient, baseconf: str, conffile:
 @click.option("--output", type=click.Path(dir_okay=True))
 @click.option("--ignore", multiple=True)
 @click.option("--labels/--no-labels", default=False, show_default=True)
-def make_dockerfile(client: docker.DockerClient, container: docker.models.containers.Container, output, ignore, labels):
+def make_dockerfile(
+    client: docker.DockerClient,
+    container: docker.models.containers.Container,
+    output,
+    ignore,
+    labels,
+):
     """make Dockerfile from running container"""
-    import tarfile
     import io
+    import tarfile
+    from contextlib import ExitStack
+
     tf: tarfile.TarFile | None = None
-    if bool(output):
-        if output == "-":
-            _log.debug("stream output")
-            tf = tarfile.open(mode="w|", fileobj=sys.stdout.buffer, format=tarfile.GNU_FORMAT)
-        elif not Path(output).is_dir():
-            _log.debug("file output: %s", output)
-            tf = tarfile.open(name=output, mode="w", format=tarfile.GNU_FORMAT)
-        else:
-            _log.debug("directory output: %s", output)
-    for name, bin in get_dockerfile(container, ignore, labels, bool(output)):
-        if tf:
-            ti = tarfile.TarInfo(name)
-            ti.mode = 0o644
-            ti.mtime = time.time()
-            ti.size = len(bin)
-            tf.addfile(ti, io.BytesIO(bin))
-        elif bool(output):
-            (Path(output) / name).write_bytes(bin)
-        elif name == "Dockerfile":
-            sys.stdout.buffer.write(bin)
-    if tf:
-        tf.close()
+    with ExitStack() as stack:
+        if bool(output):
+            if output == "-":
+                _log.debug("stream output")
+                tf = stack.enter_context(
+                    tarfile.open(
+                        mode="w|", fileobj=sys.stdout.buffer, format=tarfile.GNU_FORMAT
+                    )
+                )
+            elif not Path(output).is_dir():
+                _log.debug("file output: %s", output)
+                tf = stack.enter_context(
+                    tarfile.open(name=output, mode="w", format=tarfile.GNU_FORMAT)
+                )
+            else:
+                _log.debug("directory output: %s", output)
+        for name, bin in get_dockerfile(container, ignore, labels, bool(output)):
+            if tf:
+                ti = tarfile.TarInfo(name)
+                ti.mode = 0o644
+                ti.mtime = time.time()
+                ti.size = len(bin)
+                tf.addfile(ti, io.BytesIO(bin))
+            elif bool(output):
+                (Path(output) / name).write_bytes(bin)
+            elif name == "Dockerfile":
+                sys.stdout.buffer.write(bin)
 
 
 @cli.command()
 @verbose_option
 @container_option
 @click.option("--sbom", type=click.Path(file_okay=True), help="output filename")
-@click.option("--collector", default="syft", show_default=True, help="syft binary filepath")
-@click.option("--checker", default="grype", show_default=True, help="grype binary filepath")
+@click.option(
+    "--collector", default="syft", show_default=True, help="syft binary filepath"
+)
+@click.option(
+    "--checker", default="grype", show_default=True, help="grype binary filepath"
+)
 @click.option("--ignore-volume/--include-volume", default=True, show_default=True)
 @click.option("--ignore", multiple=True)
-def diff_sbom(client: docker.DockerClient, container: docker.models.containers.Container, ignore,
-              collector, sbom, checker, ignore_volume):
+def diff_sbom(
+    client: docker.DockerClient,
+    container: docker.models.containers.Container,
+    ignore,
+    collector,
+    sbom,
+    checker,
+    ignore_volume,
+):
     """make SBOM and check Vulnerability of updated files in container"""
-    import tempfile
-    import tarfile
     import subprocess
+    import tarfile
+    import tempfile
+
     _log.info("get metadata: %s", container.name)
     ignores = set(ignore)
     if ignore_volume:
         ignores.update(get_volumes(container))
-    deleted, added, modified, link = get_diff(container, ignores)
+    _deleted, added, modified, _link = get_diff(container, ignores)
     with tempfile.TemporaryDirectory() as td:
         tarfn = Path(td) / "files.tar"
-        rootdir = Path(td)/"root"
+        rootdir = Path(td) / "root"
         if sbom:
             sbomfn = Path(sbom)
         else:
@@ -407,9 +539,11 @@ def diff_sbom(client: docker.DockerClient, container: docker.models.containers.C
         tarfn.write_bytes(tfbin)
         _log.info("extract files: size=%s", tarfn.stat().st_size)
         with tarfile.open(tarfn) as tf:
-            tf.extractall(rootdir, filter='data')
+            tf.extractall(rootdir, filter="data")
         _log.info("generate sbom")
-        subprocess.check_call([collector, "scan", f"dir:{rootdir}", "-o", f"json={sbomfn}"])
+        subprocess.check_call(
+            [collector, "scan", f"dir:{rootdir}", "-o", f"json={sbomfn}"]
+        )
         _log.info("check vuln")
         subprocess.check_call([checker, f"sbom:{sbomfn}"])
 
@@ -420,14 +554,20 @@ def diff_sbom(client: docker.DockerClient, container: docker.models.containers.C
 @click.option("--ignore-volume/--include-volume", default=True, show_default=True)
 @click.option("--ignore", multiple=True)
 @click.option("--gzip/--raw", default=False, show_default=True)
-def tar_diff(client: docker.DockerClient, container: docker.models.containers.Container, ignore, ignore_volume, gzip):
+def tar_diff(
+    client: docker.DockerClient,
+    container: docker.models.containers.Container,
+    ignore,
+    ignore_volume,
+    gzip,
+):
     """make SBOM and check Vulnerability of updated files in container"""
     _log.info("get metadata: %s", container.name)
     ignores = set(ignore)
     if ignore_volume:
         ignores.update(get_volumes(container))
     _log.debug("ignore path: %s", ignores)
-    deleted, added, modified, link = get_diff(container, ignores)
+    _deleted, added, modified, _link = get_diff(container, ignores)
     mode = "w:gz" if gzip else "w"
     _log.info("get diffs: %s+%s file/dirs", len(added), len(modified))
     tfbin = get_archives(container, added | modified, ignores, mode)
@@ -439,13 +579,17 @@ def tar_diff(client: docker.DockerClient, container: docker.models.containers.Co
 @docker_option
 @click.option("--listen", default="0.0.0.0", show_default=True)
 @click.option("--port", type=int, default=8000, show_default=True)
-@click.option("--schema/--no-schema", default=False, help="output openapi schema and exit")
+@click.option(
+    "--schema/--no-schema", default=False, help="output openapi schema and exit"
+)
 @format_option
 def server(client: docker.DockerClient, listen, port, schema):
     """start API server"""
-    from fastapi import FastAPI
-    from .api import ComposeRoute, TraefikRoute, NginxRoute, DockerfileRoute
     import uvicorn
+    from fastapi import FastAPI
+
+    from .api import ComposeRoute, DockerfileRoute, NginxRoute, TraefikRoute
+
     api = FastAPI()
     api.include_router(ComposeRoute(client).router, prefix="/compose")
     api.include_router(TraefikRoute(client).router, prefix="/traefik")

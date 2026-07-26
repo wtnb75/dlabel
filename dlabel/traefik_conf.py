@@ -1,11 +1,12 @@
-from dictknife import deepmerge
-from pydantic import BaseModel, model_validator, BeforeValidator, ConfigDict
-from typing import Any, Annotated
 from logging import getLogger
+from typing import Annotated, Any
+
+from dictknife import deepmerge
+from pydantic import BaseModel, BeforeValidator, ConfigDict, model_validator
 
 _log = getLogger(__name__)
 
-excludes = dict(exclude_none=True, exclude_defaults=True, exclude_unset=True)
+excludes = {"exclude_none": True, "exclude_defaults": True, "exclude_unset": True}
 
 
 class Model(BaseModel):
@@ -26,8 +27,7 @@ class Model(BaseModel):
         if other is None:
             return self
         _log.debug("merge: %s +  %s", self, other)
-        obj = deepmerge(
-            self.model_dump(**excludes), other.model_dump(**excludes))
+        obj = deepmerge(self.model_dump(**excludes), other.model_dump(**excludes))
         _log.debug("merged: %s", obj)
         return self.model_validate(obj)
 
@@ -48,7 +48,9 @@ class Model(BaseModel):
         return self.model_dump_json(**excludes)
 
     def to_dict(self) -> dict:
-        return self.model_dump(exclude_unset=True, exclude_defaults=True, exclude_none=True)
+        return self.model_dump(
+            exclude_unset=True, exclude_defaults=True, exclude_none=True
+        )
 
 
 def csv_list(v: Any) -> list[str]:

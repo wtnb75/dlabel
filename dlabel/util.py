@@ -1,10 +1,11 @@
-import docker
-import tarfile
 import fnmatch
 import io
-from typing import Collection
-from pathlib import Path
+import tarfile
+from collections.abc import Collection
 from logging import getLogger
+from pathlib import Path
+
+import docker
 
 _log = getLogger(__name__)
 
@@ -52,25 +53,30 @@ def download_files(ctn: docker.models.containers.Container, filename: str):
                     yield is_dir, member, tf.read()
 
 
-def get_archives(container: docker.models.containers.Container, names: set[str], ignore: Collection[str],
-                 mode: str = "w:gz"):
+def get_archives(
+    container: docker.models.containers.Container,
+    names: set[str],
+    ignore: Collection[str],
+    mode: str = "w:gz",
+):
     if not names:
         return
     ofp = io.BytesIO()
-    outarchive = tarfile.open(mode=mode, fileobj=ofp)
-    for fn in sorted(names):
-        _log.debug("extract: %s", fn)
-        for is_dir, tinfo, bin in download_files(container, fn):
-            if is_dir:
-                tinfo.name = str(Path(fn) / tinfo.name).lstrip("/")
-            else:
-                tinfo.name = fn.lstrip("/")
-            if is_match(ignore, tinfo.name):
-                _log.debug("ignore: %s", tinfo.name)
-                continue
-            _log.debug("add file: %s (%s bytes) is_dir=%s", tinfo.name, len(bin), is_dir)
-            outarchive.addfile(tinfo, io.BytesIO(bin))
-    outarchive.close()
+    with tarfile.open(mode=mode, fileobj=ofp) as outarchive:
+        for fn in sorted(names):
+            _log.debug("extract: %s", fn)
+            for is_dir, tinfo, bin in download_files(container, fn):
+                if is_dir:
+                    tinfo.name = str(Path(fn) / tinfo.name).lstrip("/")
+                else:
+                    tinfo.name = fn.lstrip("/")
+                if is_match(ignore, tinfo.name):
+                    _log.debug("ignore: %s", tinfo.name)
+                    continue
+                _log.debug(
+                    "add file: %s (%s bytes) is_dir=%s", tinfo.name, len(bin), is_dir
+                )
+                outarchive.addfile(tinfo, io.BytesIO(bin))
     return ofp.getvalue()
 
 
@@ -88,8 +94,12 @@ def is_already(prev: set[str], target: str) -> bool:
     return False
 
 
-def do_kind0(modified: set[str], path: str, link: dict[str, str],
-             container: docker.models.containers.Container):   # modified
+def do_kind0(
+    modified: set[str],
+    path: str,
+    link: dict[str, str],
+    container: docker.models.containers.Container,
+):  # modified
     _, stats = container.get_archive(path)
     _log.debug("stats %s: %s", path, stats)
     special, _ = special_modes(stats["mode"])
@@ -101,15 +111,19 @@ def do_kind0(modified: set[str], path: str, link: dict[str, str],
         modified.add(path)
 
 
-def do_kind1(added: set[str], path: str, link: dict[str, str],
-             container: docker.models.containers.Container):   # added
+def do_kind1(
+    added: set[str],
+    path: str,
+    link: dict[str, str],
+    container: docker.models.containers.Container,
+):  # added
     if is_already(added, path):
         _log.debug("skip(parent-exists): %s", path)
     else:
         _, stats = container.get_archive(path)
         _log.debug("stats %s: %s", path, stats)
         special, _ = special_modes(stats["mode"])
-        if (nonreg-{"dir"}) & special:
+        if (nonreg - {"dir"}) & special:
             _log.debug("skip: %s %s", path, special)
         elif "symlink" in special and stats["linkTarget"]:
             link[path] = stats["linkTarget"]
@@ -125,11 +139,12 @@ def do_kind2(deleted: set[str], path: str):  # deleted
 
 
 def get_volumes(container: docker.models.containers.Container) -> set[str]:
-    return {x['Destination'] for x in container.attrs['Mounts']}
+    return {x["Destination"] for x in container.attrs["Mounts"]}
 
 
-def get_diff(container: docker.models.containers.Container, ignore: Collection[str]) -> \
-        tuple[set[str], set[str], set[str], dict[str, str]]:
+def get_diff(
+    container: docker.models.containers.Container, ignore: Collection[str]
+) -> tuple[set[str], set[str], set[str], dict[str, str]]:
     deleted: set[str] = set()
     added: set[str] = set()
     modified: set[str] = set()

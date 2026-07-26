@@ -1,14 +1,18 @@
-import docker
-from .util import get_diff, get_archives
 from logging import getLogger
+
+import docker
+
+from .util import get_archives, get_diff
 
 _log = getLogger(__name__)
 
 
-def get_dockerfile(container: docker.models.containers.Container,  # noqa: C901
-                   ignore, labels, do_output: bool):
+def get_dockerfile(
+    container: docker.models.containers.Container, ignore, labels, do_output: bool
+):
     """make Dockerfile from running container"""
     import shlex
+
     deleted, added, modified, link = get_diff(container, ignore)
     if do_output:
         ignore_str = """*
@@ -40,4 +44,4 @@ def get_dockerfile(container: docker.models.containers.Container,  # noqa: C901
                 continue
             if image_labels.get(k) != v:
                 res.append(f"LABEL {shlex.quote(k)}={shlex.quote(v)}")
-    yield "Dockerfile", "\n".join(res+[""]).encode()
+    yield "Dockerfile", "\n".join(res + [""]).encode()

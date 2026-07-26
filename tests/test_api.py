@@ -1,8 +1,10 @@
 import unittest
-from unittest.mock import MagicMock, ANY
+from unittest.mock import ANY, MagicMock
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from dlabel.api import ComposeRoute, TraefikRoute, NginxRoute
+
+from dlabel.api import ComposeRoute, NginxRoute, TraefikRoute
 
 
 class TestComposeRoute(unittest.TestCase):
@@ -49,38 +51,61 @@ class TestComposeRoute(unittest.TestCase):
         self.docker_cl.containers.list.assert_called_once_with()
 
     def _setup_mock(self):
-        img1 = self._image("docker-image:latest", {
-            "image-label1": "image-value1", "image-label2": "image-value2"})
-        ctn1 = self._container("proj1_ctn1", {
-            "com.docker.compose.project": "proj1",
-            "com.docker.compose.service": "ctn1",
-            "key2": "value2",
-            "image-label1": "image-value1",
-            "image-label2": "container-value"}, img1)
-        img2 = self._image("docker-image2:latest", {
-            "image-label1": "image-value1", "image-label2": "image-value2"})
-        ctn2 = self._container("name2", {
-            "com.docker.compose.project": "proj1",
-            "com.docker.compose.service": "ctn2",
-            "image-label1": "image-value1",
-            "image-label2": "image-value2"}, img2)
+        img1 = self._image(
+            "docker-image:latest",
+            {"image-label1": "image-value1", "image-label2": "image-value2"},
+        )
+        ctn1 = self._container(
+            "proj1_ctn1",
+            {
+                "com.docker.compose.project": "proj1",
+                "com.docker.compose.service": "ctn1",
+                "key2": "value2",
+                "image-label1": "image-value1",
+                "image-label2": "container-value",
+            },
+            img1,
+        )
+        img2 = self._image(
+            "docker-image2:latest",
+            {"image-label1": "image-value1", "image-label2": "image-value2"},
+        )
+        ctn2 = self._container(
+            "name2",
+            {
+                "com.docker.compose.project": "proj1",
+                "com.docker.compose.service": "ctn2",
+                "image-label1": "image-value1",
+                "image-label2": "image-value2",
+            },
+            img2,
+        )
         ctn2.attrs["Config"]["Env"][1] = "env2=value2=ext2"
-        ctn2.attrs["Config"]["Labels"]["com.docker.compose.project.working_dir"] = "/home/dir"
+        ctn2.attrs["Config"]["Labels"]["com.docker.compose.project.working_dir"] = (
+            "/home/dir"
+        )
         ctn2.attrs["HostConfig"] = {
             "Binds": ["/home/dir/data:/data:rw", "/home/dir2/data2:/data2:ro"],
-            "Mounts": [{
-                "Type": "volume",
-                "Target": "/db",
-                "Source": "proj1_db",
-            }],
+            "Mounts": [
+                {
+                    "Type": "volume",
+                    "Target": "/db",
+                    "Source": "proj1_db",
+                }
+            ],
             "PortBindings": {
                 "8080/tcp": [{"HostPort": "8080"}],
                 "443/udp": [{"HostPort": "443"}],
-                "8888/tcp": [{"HostIp": "127.0.0.1", "HostPort": "8888", }],
+                "8888/tcp": [
+                    {
+                        "HostIp": "127.0.0.1",
+                        "HostPort": "8888",
+                    }
+                ],
             },
             "RestartPolicy": {
                 "Name": "always",
-            }
+            },
         }
         expected = {
             "services": {
@@ -89,7 +114,7 @@ class TestComposeRoute(unittest.TestCase):
                     "labels": {
                         "key2": "value2",
                         "image-label2": "container-value",
-                    }
+                    },
                 },
                 "ctn2": {
                     "container_name": "name2",
@@ -100,13 +125,18 @@ class TestComposeRoute(unittest.TestCase):
                     "volumes": ["./data:/data", "/home/dir2/data2:/data2:ro", "db:/db"],
                     "ports": [
                         "8080:8080",
-                        {"target": 443, "published": 443, "protocol": "udp", "mode": "host"},
-                        "127.0.0.1:8888:8888"
+                        {
+                            "target": 443,
+                            "published": 443,
+                            "protocol": "udp",
+                            "mode": "host",
+                        },
+                        "127.0.0.1:8888:8888",
                     ],
                     "restart": "always",
-                }
+                },
             },
-            "volumes": {"db": {}}
+            "volumes": {"db": {}},
         }
         self.docker_cl.containers.list.return_value = [ctn1, ctn2]
         return expected
@@ -163,8 +193,15 @@ class TestTraefikRoute(unittest.TestCase):
         self.assertEqual({}, res.json())
         self.docker_cl.containers.list.assert_called_once_with()
 
-    def _container(self, name, image_name, labels: dict[str, str], args: list[str],
-                   env: list[str], ipaddr: str | None = None):
+    def _container(
+        self,
+        name,
+        image_name,
+        labels: dict[str, str],
+        args: list[str],
+        env: list[str],
+        ipaddr: str | None = None,
+    ):
         container = MagicMock()
         container.name = name
         container.status = "running"
@@ -183,12 +220,15 @@ class TestTraefikRoute(unittest.TestCase):
             "Args": args[1:],
         }
         if ipaddr:
-            container.attrs["NetworkSettings"]["Networks"] = {"xyz": {"IPAddress": "1.2.3.4"}}
+            container.attrs["NetworkSettings"]["Networks"] = {
+                "xyz": {"IPAddress": "1.2.3.4"}
+            }
         return container
 
     def _setup_mock(self):
         ctn1 = self._container(
-            "proj1_ctn1", "alpine:3",
+            "proj1_ctn1",
+            "alpine:3",
             {
                 "label123": "valule123",
                 "traefik.enable": "true",
@@ -196,9 +236,14 @@ class TestTraefikRoute(unittest.TestCase):
                 "traefik.http.routers.ctn1.middlewares": "mdl",
                 "traefik.http.routers.ctn1.rule": "Path(`/`)",
                 "traefik.http.services.ctn1.loadbalancer.server.port": "8080",
-            }, [], [], "1.2.3.4")
+            },
+            [],
+            [],
+            "1.2.3.4",
+        )
         ctn2 = self._container(
-            "proj1_ctn2", "alpine:3",
+            "proj1_ctn2",
+            "alpine:3",
             {
                 "label234": "valule234",
                 "traefik.enable": "true",
@@ -207,7 +252,10 @@ class TestTraefikRoute(unittest.TestCase):
                 "traefik.http.routers.ctn2.rule": "PathPrefix(`/ctn2`)",
                 "traefik.http.services.ctn2.loadbalancer.server.port": "9999",
                 "traefik.api": "true",
-            }, [], [])
+            },
+            [],
+            [],
+        )
         self.docker_cl.containers.list.return_value = [ctn1, ctn2]
         expected = {
             "api": {},
@@ -216,18 +264,36 @@ class TestTraefikRoute(unittest.TestCase):
                     "ctn1": {
                         "entrypoints": ["web"],
                         "rule": "Path(`/`)",
-                        "middlewares": ["mdl"]},
+                        "middlewares": ["mdl"],
+                    },
                     "ctn2": {
                         "entrypoints": ["web"],
                         "rule": "PathPrefix(`/ctn2`)",
-                        "middlewares": ["mdl"]}},
+                        "middlewares": ["mdl"],
+                    },
+                },
                 "services": {
                     "ctn1": {
                         "loadbalancer": {
-                            "server": {"host": "proj1_ctn1", "ipaddress": "1.2.3.4", "port": 8080}}},
+                            "server": {
+                                "host": "proj1_ctn1",
+                                "ipaddress": "1.2.3.4",
+                                "port": 8080,
+                            }
+                        }
+                    },
                     "ctn2": {
                         "loadbalancer": {
-                            "server": {"host": "proj1_ctn2", "ipaddress": "", "port": 9999}}}}}}
+                            "server": {
+                                "host": "proj1_ctn2",
+                                "ipaddress": "",
+                                "port": 9999,
+                            }
+                        }
+                    },
+                },
+            },
+        }
         return expected
 
     def test_label(self):
@@ -253,8 +319,15 @@ class TestNginxRoute(unittest.TestCase):
         del self.client
         del self.api
 
-    def _container(self, name, image_name, labels: dict[str, str], args: list[str],
-                   env: list[str], ipaddr: str | None = None):
+    def _container(
+        self,
+        name,
+        image_name,
+        labels: dict[str, str],
+        args: list[str],
+        env: list[str],
+        ipaddr: str | None = None,
+    ):
         container = MagicMock()
         container.name = name
         container.status = "running"
@@ -273,12 +346,15 @@ class TestNginxRoute(unittest.TestCase):
             "Args": args[1:],
         }
         if ipaddr:
-            container.attrs["NetworkSettings"]["Networks"] = {"xyz": {"IPAddress": "1.2.3.4"}}
+            container.attrs["NetworkSettings"]["Networks"] = {
+                "xyz": {"IPAddress": "1.2.3.4"}
+            }
         return container
 
     def _setup_mock(self):
         ctn1 = self._container(
-            "proj1_ctn1", "alpine:3",
+            "proj1_ctn1",
+            "alpine:3",
             {
                 "label123": "valule123",
                 "traefik.enable": "true",
@@ -286,9 +362,14 @@ class TestNginxRoute(unittest.TestCase):
                 "traefik.http.routers.ctn1.middlewares": "mdl",
                 "traefik.http.routers.ctn1.rule": "Path(`/`)",
                 "traefik.http.services.ctn1.loadbalancer.server.port": "8080",
-            }, [], [], "1.2.3.4")
+            },
+            [],
+            [],
+            "1.2.3.4",
+        )
         ctn2 = self._container(
-            "proj1_ctn2", "alpine:3",
+            "proj1_ctn2",
+            "alpine:3",
             {
                 "label234": "valule234",
                 "traefik.enable": "true",
@@ -297,60 +378,74 @@ class TestNginxRoute(unittest.TestCase):
                 "traefik.http.routers.ctn2.rule": "PathPrefix(`/ctn2`)",
                 "traefik.http.services.ctn2.loadbalancer.server.port": "9999",
                 "traefik.api": "true",
-            }, [], [])
+            },
+            [],
+            [],
+        )
         self.docker_cl.containers.list.return_value = [ctn1, ctn2]
         expected = {
             "status": "ok",
             "errors": [],
-            "config": [{
-                "status": "ok",
-                "errors": [],
-                "parsed": [{
-                    "directive": "user",
-                    "args": ["nginx"]
-                }, {
-                    "directive": "worker_processes",
-                    "args": ["auto"]
-                }, {
-                    "directive": "error_log",
-                    "args": ["/dev/stderr", "notice"]
-                }, {
-                    "directive": "events",
-                    "args": [],
-                    "block": [{
-                        "directive": "worker_connections",
-                        "args": ["512"]
-                    }]
-                }, {
-                    "directive": "http",
-                    "args": [],
-                    "block": [{
-                        "directive": "server",
-                        "args": [],
-                        "block": [{
-                            "directive": "listen",
-                            "args": ["80", "default_server"]
-                        }, {
-                            "directive": "server_name",
-                            "args": ["localhost"]
-                        }, {
-                            "directive": "location",  # no particular order
-                            "args": ANY,        # ["=", "/"],
-                            "block": [{
-                                "directive": "proxy_pass",
-                                "args": [ANY],  # ["http://1.2.3.4:8080"]
-                            }]
-                        }, {
-                            "directive": "location",  # no particular order
-                            "args": ANY,        # ["/ctn2"]
-                            "block": [{
-                                "directive": "proxy_pass",
-                                "args": [ANY],  # ["http://:9999"]
-                            }],
-                        }]
-                    }]
-                }]
-            }]
+            "config": [
+                {
+                    "status": "ok",
+                    "errors": [],
+                    "parsed": [
+                        {"directive": "user", "args": ["nginx"]},
+                        {"directive": "worker_processes", "args": ["auto"]},
+                        {"directive": "error_log", "args": ["/dev/stderr", "notice"]},
+                        {
+                            "directive": "events",
+                            "args": [],
+                            "block": [
+                                {"directive": "worker_connections", "args": ["512"]}
+                            ],
+                        },
+                        {
+                            "directive": "http",
+                            "args": [],
+                            "block": [
+                                {
+                                    "directive": "server",
+                                    "args": [],
+                                    "block": [
+                                        {
+                                            "directive": "listen",
+                                            "args": ["80", "default_server"],
+                                        },
+                                        {
+                                            "directive": "server_name",
+                                            "args": ["localhost"],
+                                        },
+                                        {
+                                            "directive": "location",  # no particular order
+                                            "args": ANY,  # ["=", "/"],
+                                            "block": [
+                                                {
+                                                    "directive": "proxy_pass",
+                                                    "args": [
+                                                        ANY
+                                                    ],  # ["http://1.2.3.4:8080"]
+                                                }
+                                            ],
+                                        },
+                                        {
+                                            "directive": "location",  # no particular order
+                                            "args": ANY,  # ["/ctn2"]
+                                            "block": [
+                                                {
+                                                    "directive": "proxy_pass",
+                                                    "args": [ANY],  # ["http://:9999"]
+                                                }
+                                            ],
+                                        },
+                                    ],
+                                }
+                            ],
+                        },
+                    ],
+                }
+            ],
         }
         return expected
 
