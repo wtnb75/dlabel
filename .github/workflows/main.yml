@@ -15,14 +15,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-    - uses: wtnb75/actions/python@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
+    - uses: wtnb75/actions/python@v1
       with:
         extra-args: "--extra ssh"
-    - uses: wtnb75/actions/ruff@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
-    - uses: wtnb75/actions/pytest@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
-    - uses: wtnb75/actions/wheel@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
+    - uses: wtnb75/actions/ruff@v1
+    - uses: wtnb75/actions/pytest@v1
+    - uses: wtnb75/actions/wheel@v1
     - id: pdoc
-      uses: wtnb75/actions/pdoc@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
+      uses: wtnb75/actions/pdoc@v1
       with:
         output-dir: docs
         module: dlabel
@@ -36,7 +36,7 @@ jobs:
     - name: deploy pages
       uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
       id: deployment
-    - uses: wtnb75/actions/docker@9789197715f5a6b54a25832ce27193be50662266 # v1.0.4
+    - uses: wtnb75/actions/docker@v1
       with:
         push: 'true'
         context: .
